@@ -46,7 +46,16 @@ fn main() {
             compress: codec_name,
             level,
             no_ignore,
-        } => cmd_create(&archive, &paths, &codec_name, level, no_ignore, cli.quiet),
+            encrypt,
+        } => cmd_create(
+            &archive,
+            &paths,
+            &codec_name,
+            level,
+            no_ignore,
+            encrypt,
+            cli.quiet,
+        ),
         Command::Extract { archive, output } => {
             let dest = output.unwrap_or_else(|| PathBuf::from("."));
             cmd_extract(&archive, &dest, cli.quiet)
@@ -67,15 +76,24 @@ fn cmd_create(
     paths: &[PathBuf],
     codec_name: &str,
     level: i32,
-    _no_ignore: bool,
+    no_ignore: bool,
+    encrypt: bool,
     quiet: bool,
 ) -> error::Result<()> {
     let codec = compress::codec_from_str(codec_name)?;
+
+    if encrypt && !quiet {
+        println!(
+            "  {} Encryption enabled (dedup disabled for privacy)",
+            style("🔒").dim()
+        );
+    }
 
     let opts = archive::CreateOptions {
         codec,
         level,
         show_progress: !quiet,
+        respect_gitignore: !no_ignore,
     };
 
     let source_refs: Vec<&std::path::Path> = paths.iter().map(|p| p.as_path()).collect();

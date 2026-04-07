@@ -49,6 +49,10 @@ pub enum Command {
         /// Don't respect .gitignore files
         #[arg(long)]
         no_ignore: bool,
+
+        /// Encrypt the archive (prompts for passphrase)
+        #[arg(long, short)]
+        encrypt: bool,
     },
 
     /// Extract an archive

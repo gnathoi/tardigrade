@@ -3,8 +3,8 @@ use std::io::{BufWriter, Write};
 use std::path::Path;
 use std::sync::atomic::Ordering;
 
+use ignore::WalkBuilder;
 use rayon::prelude::*;
-use walkdir::WalkDir;
 
 use crate::chunk::{Chunk, chunk_data};
 use crate::compress;
@@ -21,6 +21,7 @@ pub struct CreateOptions {
     pub codec: u8,
     pub level: i32,
     pub show_progress: bool,
+    pub respect_gitignore: bool,
 }
 
 impl Default for CreateOptions {
@@ -29,6 +30,7 @@ impl Default for CreateOptions {
             codec: CODEC_ZSTD,
             level: 3,
             show_progress: false,
+            respect_gitignore: true,
         }
     }
 }
@@ -68,7 +70,18 @@ pub fn create_archive(
     // Phase 1: Walk and collect all file paths
     let mut walk_entries = Vec::new();
     for source in sources {
-        let walker = WalkDir::new(source).follow_links(false);
+        let walker = WalkBuilder::new(source)
+            .git_ignore(opts.respect_gitignore)
+            .git_global(opts.respect_gitignore)
+            .git_exclude(opts.respect_gitignore)
+            .hidden(false) // include dotfiles like .env
+            .filter_entry(|e| {
+                // Always skip .git directories
+                !(e.file_type().is_some_and(|ft| ft.is_dir()) && e.file_name() == ".git")
+            })
+            .follow_links(false)
+            .build();
+
         for entry in walker {
             let entry = entry.map_err(|e| Error::IoPath {
                 path: source.to_path_buf(),
