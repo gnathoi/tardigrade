@@ -10,6 +10,24 @@ use crate::format::*;
 use crate::index::deserialize_index;
 use crate::metadata::{restore_metadata, validate_extraction_path};
 
+use std::sync::Arc;
+
+/// Get a block from cache or read it. Returns Arc to avoid cloning.
+fn get_block(
+    reader: &mut (impl Read + Seek),
+    cache: &mut HashMap<u64, Arc<Vec<u8>>>,
+    offset: u64,
+    key: Option<&SymmetricKey>,
+) -> Result<Arc<Vec<u8>>> {
+    if let Some(cached) = cache.get(&offset) {
+        return Ok(Arc::clone(cached));
+    }
+    let (_, data) = read_block(reader, offset, key)?;
+    let arc = Arc::new(data);
+    cache.insert(offset, Arc::clone(&arc));
+    Ok(arc)
+}
+
 /// Read the footer from the end of an archive file.
 pub fn read_footer(reader: &mut (impl Read + Seek)) -> Result<Footer> {
     reader.seek(SeekFrom::End(-(FOOTER_SIZE as i64)))?;
@@ -118,10 +136,10 @@ fn extract_archive_inner(
         errors: 0,
     };
 
-    // Cache for decompressed blocks (avoid re-reading shared blocks)
-    let mut block_cache: HashMap<u64, Vec<u8>> = HashMap::new();
+    // Cache for decompressed blocks — uses Arc to avoid cloning large buffers
+    let mut block_cache: HashMap<u64, std::sync::Arc<Vec<u8>>> = HashMap::new();
 
-    // First pass: create directories
+    // First pass: create all directories
     for entry in &entries {
         if entry.file_type == FileType::Directory {
             let target = validate_extraction_path(&entry.path, dest)?;
@@ -136,40 +154,63 @@ fn extract_archive_inner(
             FileType::File => {
                 let target = validate_extraction_path(&entry.path, dest)?;
 
-                // Ensure parent directory exists
                 if let Some(parent) = target.parent() {
                     fs::create_dir_all(parent).map_err(|e| Error::io_path(parent, e))?;
                 }
 
-                // Reassemble file from blocks
-                let mut file_data = Vec::with_capacity(entry.size as usize);
-                for block_ref in &entry.block_refs {
-                    let block_data = if let Some(cached) = block_cache.get(&block_ref.offset) {
-                        cached.clone()
-                    } else {
-                        let (_, data) = read_block(&mut reader, block_ref.offset, key.as_ref())?;
-                        block_cache.insert(block_ref.offset, data.clone());
-                        data
-                    };
+                // Fast path: single-block file (very common for source code)
+                if entry.block_refs.len() == 1 {
+                    let block_ref = &entry.block_refs[0];
+                    let block_data = get_block(
+                        &mut reader,
+                        &mut block_cache,
+                        block_ref.offset,
+                        key.as_ref(),
+                    )?;
 
                     let start = block_ref.slice_start as usize;
                     let end = start + block_ref.slice_len as usize;
                     if end > block_data.len() {
                         return Err(Error::InvalidArchive(format!(
-                            "block ref slice out of bounds: {}..{} > {}",
+                            "block ref out of bounds: {}..{} > {}",
                             start,
                             end,
                             block_data.len()
                         )));
                     }
-                    file_data.extend_from_slice(&block_data[start..end]);
-                }
 
-                fs::write(&target, &file_data).map_err(|e| Error::io_path(&target, e))?;
+                    fs::write(&target, &block_data[start..end])
+                        .map_err(|e| Error::io_path(&target, e))?;
+                } else {
+                    // Multi-block file: reassemble
+                    let mut file_data = Vec::with_capacity(entry.size as usize);
+                    for block_ref in &entry.block_refs {
+                        let block_data = get_block(
+                            &mut reader,
+                            &mut block_cache,
+                            block_ref.offset,
+                            key.as_ref(),
+                        )?;
+
+                        let start = block_ref.slice_start as usize;
+                        let end = start + block_ref.slice_len as usize;
+                        if end > block_data.len() {
+                            return Err(Error::InvalidArchive(format!(
+                                "block ref out of bounds: {}..{} > {}",
+                                start,
+                                end,
+                                block_data.len()
+                            )));
+                        }
+                        file_data.extend_from_slice(&block_data[start..end]);
+                    }
+
+                    fs::write(&target, &file_data).map_err(|e| Error::io_path(&target, e))?;
+                }
                 restore_metadata(&target, entry)?;
 
                 stats.file_count += 1;
-                stats.total_size += file_data.len() as u64;
+                stats.total_size += entry.size;
             }
             FileType::Symlink(target_bytes) => {
                 let target = validate_extraction_path(&entry.path, dest)?;
