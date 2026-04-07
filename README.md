@@ -1,41 +1,32 @@
-<p align="center">
-<pre align="center">
-                       :+xXXXXXxXXX+
-          :+Xxxxx+xxxXXxxx++xx++xXx+xxxx+
-        xxxx++++++++++++xxX;;;++++xx+;++;+XX.
-      Xxxxxxx++x+;;;;;;;+++xx;;;;;;++X::;;;xXXx
-    +xxxx+++++++++;:;;;;;;;+++x:;;;;;;x;:;;;xxx+x
-  +Xxxx+++++;++;;;;;.:;;;;;;;;;+::;;;;;+;;;:;xxx;++
- xX++++++;;;;;;;;;;;.:;;;;:;;;;;;.:;;;;;+;;;:+x+;;x
-:X++;;;;;:;;;;;;;;;;: :;;;;;;;;;;.::;;;;;+:::;;x::;X
-xx+;;;;..;;;;;:::;;;: .:;;;;;;;;;.:::;;;;;+:::;x::;x.
-x+;;;: :;;;;::::;;::: .;;;;;;;;;; .:::;;;;+.::;+..:;+
- x;:;::.;;;::::::::::. :;;;;;::;;; .:::;;;;+:::+x .:x+
- ++x;;::::;:::::::::. .::;;:::::;. .:::;:;;+:.::+;.:;;
-  ;: .:..:;::;:::::.  ::;;::::::: ...::::;;+:.:;++..:+
-  x;++:;::;::;:::::...;::.::;::+......::::;;..:::+.:;+
- x;;:+;;:::;::;xx++++;;::;;;;;;;.:...::::::;...::+:::;
-  ;::::.:;.;:..:;     :;;;;::::+;:;::::::;;;..::;  :
-  ;;::::;   ::.        +;;:::::     .::::+    ..
-   ..:.                 :;;::         :..
-                         . ..
-</pre>
-</p>
+```
+                           :+xXXXXXxXXX+
+              :+Xxxxx+xxxXXxxx++xx++xXx+xxxx+
+            xxxx++++++++++++xxX;;;++++xx+;++;+XX.
+          Xxxxxxx++x+;;;;;;;+++xx;;;;;;++X::;;;xXXx
+        +xxxx+++++++++;:;;;;;;;+++x:;;;;;;x;:;;;xxx+x
+      +Xxxx+++++;++;;;;;.:;;;;;;;;;+::;;;;;+;;;:;xxx;++
+     xX++++++;;;;;;;;;;;.:;;;;:;;;;;;.:;;;;;+;;;:+x+;;x
+    :X++;;;;;:;;;;;;;;;;: :;;;;;;;;;;.::;;;;;+:::;;x::;X
+    xx+;;;;..;;;;;:::;;;: .:;;;;;;;;;.:::;;;;;+:::;x::;x.
+   .x+;;;: :;;;;::::;;::: .;;;;;;;;;; .:::;;;;+.::;+..:;+
+    x;:;::.;;;::::::::::. :;;;;;::;;; .:::;;;;+:::+x .:x+
+    ++x;;::::;:::::::::. .::;;:::::;. .:::;:;;+:.::+;.:;;
+     ;: .:..:;::;:::::.  ::;;::::::: ...::::;;+:.:;++..:+
+     x;++:;::;::;:::::...;::.::;::+......::::;;..:::+.:;+
+    x;;:+;;:::;::;xx++++;;::;;;;;;;.:...::::::;...::+:::;
+     ;::::.:;.;:..:;     :;;;;::::+;:;::::::;;;..::;  :
+     ;;::::;   ::.        +;;:::::     .::::+    ..
+      ..:.                 :;;::         :..
+                            . ..
+```
 
-<h1 align="center">tardigrade</h1>
+# tardigrade
 
-<p align="center">
-<strong>Modern archiving for modern systems.</strong> tar, but for 2026.<br>
-Fast, multithreaded, content-addressed, encrypted, and beautiful.
-</p>
+Modern archiving for modern systems. tar, but for 2026.
 
-<p align="center">
-<a href="https://github.com/gnathoi/tardigrade/actions/workflows/ci.yml"><img src="https://github.com/gnathoi/tardigrade/actions/workflows/ci.yml/badge.svg" alt="CI"></a>
-</p>
+`11x faster` than tar+zstd on source code | `78% smaller` archives with dedup | `2 GB/s` throughput
 
-<p align="center">
-<code>11x faster</code> than tar+zstd on source code &nbsp;|&nbsp; <code>78% smaller</code> archives with dedup &nbsp;|&nbsp; <code>2 GB/s</code> throughput
-</p>
+[![CI](https://github.com/gnathoi/tardigrade/actions/workflows/ci.yml/badge.svg)](https://github.com/gnathoi/tardigrade/actions/workflows/ci.yml)
 
 ---
 

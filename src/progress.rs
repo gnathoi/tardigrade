@@ -1,17 +1,10 @@
 use std::sync::Arc;
 use std::sync::atomic::{AtomicU64, Ordering};
+use std::time::Duration;
 
 use console::style;
 use humansize::{BINARY, format_size};
 use indicatif::{MultiProgress, ProgressBar, ProgressStyle};
-
-/// Progress tracking for archive creation
-pub struct CreateProgress {
-    multi: MultiProgress,
-    scan_bar: ProgressBar,
-    compress_bar: ProgressBar,
-    pub stats: Arc<ProgressStats>,
-}
 
 pub struct ProgressStats {
     pub files_scanned: AtomicU64,
@@ -37,57 +30,58 @@ impl ProgressStats {
     }
 }
 
+/// Progress display for archive creation
+pub struct CreateProgress {
+    _multi: MultiProgress,
+    main_bar: ProgressBar,
+    status_bar: ProgressBar,
+    pub stats: Arc<ProgressStats>,
+}
+
 impl CreateProgress {
     pub fn new(total_bytes: u64) -> Self {
         let multi = MultiProgress::new();
-
-        let scan_style = ProgressStyle::with_template("  {spinner:.cyan} Scanning...  {msg}")
-            .unwrap()
-            .tick_chars("⠋⠙⠹⠸⠼⠴⠦⠧⠇⠏");
-
-        let scan_bar = multi.add(ProgressBar::new_spinner());
-        scan_bar.set_style(scan_style);
-        scan_bar.enable_steady_tick(std::time::Duration::from_millis(80));
-
-        let compress_style = ProgressStyle::with_template(
-            "  {bar:30.cyan/dim} {percent:>3}%  {binary_bytes_per_sec}  ETA {eta}  {msg}",
-        )
-        .unwrap()
-        .progress_chars("━╸─");
-
-        let compress_bar = multi.add(ProgressBar::new(total_bytes));
-        compress_bar.set_style(compress_style);
-
         let stats = ProgressStats::new();
 
+        // Main progress bar — the one that fills up
+        let main_style = ProgressStyle::with_template(
+            "  {bar:40.green/dark_gray} {percent:>3}%  {binary_bytes_per_sec:>12}  ETA {eta_precise}",
+        )
+        .unwrap()
+        .progress_chars("━━╸");
+
+        let main_bar = multi.add(ProgressBar::new(total_bytes));
+        main_bar.set_style(main_style);
+        main_bar.enable_steady_tick(Duration::from_millis(80));
+
+        // Status line below — shows live compression stats
+        let status_style = ProgressStyle::with_template("  {msg}").unwrap();
+
+        let status_bar = multi.add(ProgressBar::new_spinner());
+        status_bar.set_style(status_style);
+        status_bar.enable_steady_tick(Duration::from_millis(200));
+
         Self {
-            multi,
-            scan_bar,
-            compress_bar,
+            _multi: multi,
+            main_bar,
+            status_bar,
             stats,
         }
-    }
-
-    pub fn set_scan_msg(&self, files: u64, bytes: u64) {
-        self.scan_bar.set_message(format!(
-            "{} files, {}",
-            style(files).bold(),
-            style(format_size(bytes, BINARY)).cyan()
-        ));
     }
 
     pub fn finish_scan(&self) {
         let files = self.stats.files_scanned.load(Ordering::Relaxed);
         let bytes = self.stats.bytes_scanned.load(Ordering::Relaxed);
-        self.scan_bar.finish_with_message(format!(
-            "{} files, {}",
-            style(files).bold(),
-            style(format_size(bytes, BINARY)).cyan()
+        self.status_bar.set_message(format!(
+            "{} {} files, {}",
+            style("○").dim(),
+            style(files).white().bold(),
+            style(format_size(bytes, BINARY)).dim(),
         ));
     }
 
     pub fn inc_compressed(&self, bytes: u64) {
-        self.compress_bar.inc(bytes);
+        self.main_bar.inc(bytes);
 
         let input = self.stats.bytes_scanned.load(Ordering::Relaxed);
         let written = self.stats.bytes_written.load(Ordering::Relaxed);
@@ -99,22 +93,31 @@ impl CreateProgress {
             0.0
         };
 
-        let mut msg = format!("Ratio: {:.1}x", ratio,);
+        let mut parts = vec![format!(
+            "{} ratio: {}",
+            style("○").dim(),
+            style(format!("{:.1}x", ratio)).cyan().bold(),
+        )];
 
         if dedup > 0 {
-            msg.push_str(&format!("  Dedup: {} saved", format_size(dedup, BINARY)));
+            parts.push(format!(
+                "dedup: {}",
+                style(format!("-{}", format_size(dedup, BINARY)))
+                    .green()
+                    .bold(),
+            ));
         }
 
-        self.compress_bar.set_message(msg);
+        self.status_bar.set_message(parts.join("  "));
     }
 
     pub fn finish(&self) {
-        self.compress_bar.finish_and_clear();
-        self.scan_bar.finish_and_clear();
+        self.main_bar.finish_and_clear();
+        self.status_bar.finish_and_clear();
     }
 }
 
-/// Progress tracking for extraction
+/// Progress display for extraction
 pub struct ExtractProgress {
     bar: ProgressBar,
 }
@@ -122,13 +125,14 @@ pub struct ExtractProgress {
 impl ExtractProgress {
     pub fn new(total_files: u64) -> Self {
         let style = ProgressStyle::with_template(
-            "  {bar:30.green/dim} {percent:>3}%  {pos}/{len} files  {msg}",
+            "  {bar:40.green/dark_gray} {percent:>3}%  {pos}/{len} files",
         )
         .unwrap()
-        .progress_chars("━╸─");
+        .progress_chars("━━╸");
 
         let bar = ProgressBar::new(total_files);
         bar.set_style(style);
+        bar.enable_steady_tick(Duration::from_millis(80));
 
         Self { bar }
     }

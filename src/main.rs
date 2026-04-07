@@ -91,8 +91,8 @@ fn cmd_create(
     let passphrase = if encrypt {
         if !quiet {
             println!(
-                "  {} Encryption enabled (dedup disabled for privacy)",
-                style("🔒").dim()
+                "  {}",
+                style("encryption enabled (dedup disabled for privacy)").dim()
             );
         }
         let pass = rpassword::prompt_password("Passphrase: ")
@@ -136,40 +136,63 @@ fn cmd_create(
             0.0
         };
 
+        println!();
         println!(
-            "\n{} Created {} ({} {} {}, {:.1}x ratio, {:.1}s, {:.0} MB/s)",
-            style("✓").green().bold(),
-            style(archive.display()).bold(),
-            style(format_size(stats.archive_size, BINARY)).cyan(),
-            style("←").dim(),
-            style(format_size(stats.total_input_size, BINARY)).white(),
-            ratio,
-            elapsed.as_secs_f64(),
-            throughput,
+            "  {} {}",
+            style("created").green().bold(),
+            style(archive.display()).white().bold(),
         );
-
+        println!();
         println!(
-            "  {} files, {} dirs, {} blocks ({} unique)",
-            style(stats.file_count).bold(),
-            stats.dir_count,
-            stats.block_count,
-            stats.unique_blocks,
+            "  {}  {}  {}",
+            style(format!(
+                "{} → {}",
+                format_size(stats.total_input_size, BINARY),
+                format_size(stats.archive_size, BINARY)
+            ))
+            .white(),
+            style(format!("{:.1}x", ratio)).cyan().bold(),
+            style(compress::codec_name(codec)).dim(),
+        );
+        println!(
+            "  {}  {}",
+            style(format!(
+                "{} files, {} dirs",
+                stats.file_count, stats.dir_count
+            ))
+            .dim(),
+            style(format!(
+                "{} blocks ({} unique)",
+                stats.block_count, stats.unique_blocks
+            ))
+            .dim(),
         );
 
         if stats.dedup_savings > 0 {
             println!(
-                "  {} {} saved by dedup",
-                style("↗").green(),
-                style(format_size(stats.dedup_savings, BINARY))
-                    .green()
-                    .bold(),
+                "  {} {}",
+                style(format!(
+                    "{} saved by dedup",
+                    format_size(stats.dedup_savings, BINARY)
+                ))
+                .green()
+                .bold(),
+                style(format!(
+                    "({} duplicate blocks eliminated)",
+                    stats.block_count - stats.unique_blocks
+                ))
+                .dim(),
             );
         }
 
         println!(
-            "  Compression: {}  Codec: {}",
-            style(format!("{:.1}x", ratio)).cyan(),
-            compress::codec_name(codec),
+            "  {}",
+            style(format!(
+                "{:.2}s  {:.0} MB/s",
+                elapsed.as_secs_f64(),
+                throughput
+            ))
+            .dim(),
         );
     }
 
@@ -188,14 +211,27 @@ fn cmd_extract(archive: &Path, dest: &Path, encrypt: bool, quiet: bool) -> error
     let elapsed = start.elapsed();
 
     if !quiet {
+        println!();
         println!(
-            "\n{} Extracted {} ({} files, {} dirs, {}, {:.1}s)",
-            style("✓").green().bold(),
-            style(archive.display()).bold(),
-            style(stats.file_count).bold(),
-            stats.dir_count,
-            style(format_size(stats.total_size, BINARY)).cyan(),
-            elapsed.as_secs_f64(),
+            "  {} {} {} {}",
+            style("extracted").green().bold(),
+            style(archive.display()).white().bold(),
+            style("->").dim(),
+            style(dest.display()).white(),
+        );
+        println!();
+        println!(
+            "  {}  {}",
+            style(format_size(stats.total_size, BINARY)).white(),
+            style(format!(
+                "{} files, {} dirs",
+                stats.file_count, stats.dir_count
+            ))
+            .dim(),
+        );
+        println!(
+            "  {}",
+            style(format!("{:.2}s", elapsed.as_secs_f64())).dim()
         );
     }
 
@@ -303,35 +339,41 @@ fn cmd_verify(archive: &Path, quiet: bool) -> error::Result<()> {
     let elapsed = start.elapsed();
 
     if !quiet {
+        println!();
+        if report.blocks_corrupted == 0 {
+            println!(
+                "  {} {}",
+                style("verified").green().bold(),
+                style(archive.display()).white().bold(),
+            );
+        } else {
+            println!(
+                "  {} {}",
+                style("CORRUPTED").red().bold(),
+                style(archive.display()).white().bold(),
+            );
+        }
+        println!();
         println!(
-            "\n{} Verify: {}",
-            if report.blocks_corrupted == 0 {
-                style("✓").green().bold()
-            } else {
-                style("✗").red().bold()
-            },
-            style(archive.display()).bold(),
-        );
-        println!(
-            "  Header: {}  Footer: {}  Index: {}",
+            "  header {}  footer {}  index {}",
             if report.header_ok {
-                style("OK").green()
+                style("ok").green()
             } else {
-                style("FAIL").red()
+                style("FAIL").red().bold()
             },
             if report.footer_ok {
-                style("OK").green()
+                style("ok").green()
             } else {
-                style("FAIL").red()
+                style("FAIL").red().bold()
             },
             if report.index_ok {
-                style("OK").green()
+                style("ok").green()
             } else {
-                style("FAIL").red()
+                style("FAIL").red().bold()
             },
         );
         println!(
-            "  Blocks: {}/{} OK, {} corrupted ({:.1}s)",
+            "  blocks {}/{} ok, {} corrupted",
             style(report.blocks_ok).green(),
             report.blocks_checked,
             if report.blocks_corrupted > 0 {
@@ -339,14 +381,15 @@ fn cmd_verify(archive: &Path, quiet: bool) -> error::Result<()> {
             } else {
                 style(0u64).green().bold()
             },
-            elapsed.as_secs_f64(),
+        );
+        println!(
+            "  {}",
+            style(format!("{:.2}s", elapsed.as_secs_f64())).dim()
         );
 
         if !report.corrupted_blocks.is_empty() {
-            println!(
-                "\n  {} Corrupted blocks:",
-                style("Damage map:").red().bold()
-            );
+            println!();
+            println!("  {}", style("damage map:").red().bold());
             for block in &report.corrupted_blocks {
                 println!(
                     "    offset {}: {} (expected {})",
@@ -356,14 +399,15 @@ fn cmd_verify(archive: &Path, quiet: bool) -> error::Result<()> {
         }
 
         if !report.affected_files.is_empty() {
-            println!("\n  {} Affected files:", style("Impact:").red().bold());
+            println!();
+            println!("  {}", style("affected files:").red().bold());
             for file in &report.affected_files {
-                println!("    {} {}", style("✗").red(), file);
+                println!("    {}", style(file).red());
             }
         }
 
         if report.blocks_corrupted == 0 {
-            println!("\n  {} Archive integrity verified", style("✓").green());
+            println!();
         }
     }
 
