@@ -9,6 +9,7 @@ use rayon::prelude::*;
 use crate::chunk::{Chunk, chunk_data};
 use crate::compress;
 use crate::dedup::DedupStore;
+use crate::encrypt::{self, KeyEncapsulation, SymmetricKey};
 use crate::error::{Error, Result};
 use crate::format::*;
 use crate::hash::merkle_root;
@@ -22,6 +23,7 @@ pub struct CreateOptions {
     pub level: i32,
     pub show_progress: bool,
     pub respect_gitignore: bool,
+    pub passphrase: Option<Vec<u8>>,
 }
 
 impl Default for CreateOptions {
@@ -31,6 +33,7 @@ impl Default for CreateOptions {
             level: 3,
             show_progress: false,
             respect_gitignore: true,
+            passphrase: None,
         }
     }
 }
@@ -147,15 +150,33 @@ pub fn create_archive(
     let file = File::create(archive_path).map_err(|e| Error::io_path(archive_path, e))?;
     let mut writer = BufWriter::new(file);
 
-    let header = ArchiveHeader::new(0);
+    // Encryption setup
+    let encryption = opts.passphrase.as_ref().map(|pass| {
+        let archive_key = encrypt::generate_key();
+        let encap = KeyEncapsulation::from_passphrase(&archive_key, pass).unwrap();
+        (archive_key, encap)
+    });
+    let encrypted = encryption.is_some();
+
+    let flags = if encrypted { FLAG_ENCRYPTED } else { 0 };
+    let header = ArchiveHeader::new(flags);
     let mut header_bytes = Vec::with_capacity(ARCHIVE_HEADER_SIZE);
     header.write_to(&mut header_bytes)?;
     writer.write_all(&header_bytes)?;
 
+    let mut current_offset = ARCHIVE_HEADER_SIZE as u64;
+
+    // Write key encapsulation block if encrypted
+    if let Some((_, ref encap)) = encryption {
+        let mut encap_bytes = Vec::new();
+        encap.write_to(&mut encap_bytes)?;
+        writer.write_all(&encap_bytes)?;
+        current_offset += encap_bytes.len() as u64;
+    }
+
     let mut dedup = DedupStore::new();
     let mut entries: Vec<FileEntry> = Vec::new();
     let mut block_hashes: Vec<Hash> = Vec::new();
-    let mut current_offset = ARCHIVE_HEADER_SIZE as u64;
 
     let mut stats = CreateStats {
         file_count: 0,
@@ -185,60 +206,69 @@ pub fn create_archive(
         for chunk in pf.chunks {
             stats.block_count += 1;
 
-            if let Some(existing_offset) = dedup.get(&chunk.hash) {
-                // Deduplicated block
-                stats.dedup_savings += chunk.uncompressed_size as u64;
-                pf.entry.block_refs.push(BlockRef {
-                    hash: chunk.hash,
-                    offset: existing_offset,
-                    slice_start: 0,
-                    slice_len: chunk.uncompressed_size,
-                    flags: 0,
-                    reserved: [0; 3],
-                });
+            // Dedup is disabled when encrypted (hash leakage protection)
+            if !encrypted {
+                if let Some(existing_offset) = dedup.get(&chunk.hash) {
+                    stats.dedup_savings += chunk.uncompressed_size as u64;
+                    pf.entry.block_refs.push(BlockRef {
+                        hash: chunk.hash,
+                        offset: existing_offset,
+                        slice_start: 0,
+                        slice_len: chunk.uncompressed_size,
+                        flags: 0,
+                        reserved: [0; 3],
+                    });
 
-                if let Some(ref p) = progress {
-                    p.stats.blocks_deduped.fetch_add(1, Ordering::Relaxed);
-                    p.stats
-                        .dedup_savings
-                        .fetch_add(chunk.uncompressed_size as u64, Ordering::Relaxed);
-                    p.inc_compressed(chunk.uncompressed_size as u64);
+                    if let Some(ref p) = progress {
+                        p.stats.blocks_deduped.fetch_add(1, Ordering::Relaxed);
+                        p.stats
+                            .dedup_savings
+                            .fetch_add(chunk.uncompressed_size as u64, Ordering::Relaxed);
+                        p.inc_compressed(chunk.uncompressed_size as u64);
+                    }
+                    continue;
                 }
+            }
+
+            // Possibly encrypt the compressed data
+            let write_data = if let Some((ref key, _)) = encryption {
+                encrypt::encrypt_block(&chunk.compressed_data, key, &chunk.hash)?
             } else {
-                // New unique block
-                let block_header = BlockHeader::new(
-                    chunk.hash,
-                    chunk.compressed_data.len() as u32,
-                    chunk.uncompressed_size,
-                    chunk.codec,
-                );
+                chunk.compressed_data
+            };
 
-                let block_offset = current_offset;
-                block_header.write_to(&mut writer)?;
-                writer.write_all(&chunk.compressed_data)?;
+            let block_header = BlockHeader::new(
+                chunk.hash,
+                write_data.len() as u32,
+                chunk.uncompressed_size,
+                chunk.codec,
+            );
 
-                current_offset += BLOCK_HEADER_SIZE as u64 + chunk.compressed_data.len() as u64;
-                stats.total_compressed_size += chunk.compressed_data.len() as u64;
-                stats.unique_blocks += 1;
+            let block_offset = current_offset;
+            block_header.write_to(&mut writer)?;
+            writer.write_all(&write_data)?;
 
-                dedup.insert(chunk.hash, block_offset);
-                block_hashes.push(chunk.hash);
+            current_offset += BLOCK_HEADER_SIZE as u64 + write_data.len() as u64;
+            stats.total_compressed_size += write_data.len() as u64;
+            stats.unique_blocks += 1;
 
-                pf.entry.block_refs.push(BlockRef {
-                    hash: chunk.hash,
-                    offset: block_offset,
-                    slice_start: 0,
-                    slice_len: chunk.uncompressed_size,
-                    flags: 0,
-                    reserved: [0; 3],
-                });
+            dedup.insert(chunk.hash, block_offset);
+            block_hashes.push(chunk.hash);
 
-                if let Some(ref p) = progress {
-                    p.stats
-                        .bytes_written
-                        .fetch_add(chunk.compressed_data.len() as u64, Ordering::Relaxed);
-                    p.inc_compressed(chunk.uncompressed_size as u64);
-                }
+            pf.entry.block_refs.push(BlockRef {
+                hash: chunk.hash,
+                offset: block_offset,
+                slice_start: 0,
+                slice_len: chunk.uncompressed_size,
+                flags: 0,
+                reserved: [0; 3],
+            });
+
+            if let Some(ref p) = progress {
+                p.stats
+                    .bytes_written
+                    .fetch_add(write_data.len() as u64, Ordering::Relaxed);
+                p.inc_compressed(chunk.uncompressed_size as u64);
             }
         }
 

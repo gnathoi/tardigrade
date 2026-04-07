@@ -64,6 +64,10 @@ pub enum Command {
         /// Destination directory (default: current directory)
         #[arg(short, long)]
         output: Option<PathBuf>,
+
+        /// Decrypt the archive (prompts for passphrase)
+        #[arg(long, short)]
+        encrypt: bool,
     },
 
     /// List archive contents

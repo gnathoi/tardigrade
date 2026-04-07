@@ -56,9 +56,13 @@ fn main() {
             encrypt,
             cli.quiet,
         ),
-        Command::Extract { archive, output } => {
+        Command::Extract {
+            archive,
+            output,
+            encrypt,
+        } => {
             let dest = output.unwrap_or_else(|| PathBuf::from("."));
-            cmd_extract(&archive, &dest, cli.quiet)
+            cmd_extract(&archive, &dest, encrypt, cli.quiet)
         }
         Command::List { archive, long } => cmd_list(&archive, long),
         Command::Info { archive } => cmd_info(&archive),
@@ -82,18 +86,33 @@ fn cmd_create(
 ) -> error::Result<()> {
     let codec = compress::codec_from_str(codec_name)?;
 
-    if encrypt && !quiet {
-        println!(
-            "  {} Encryption enabled (dedup disabled for privacy)",
-            style("🔒").dim()
-        );
-    }
+    let passphrase = if encrypt {
+        if !quiet {
+            println!(
+                "  {} Encryption enabled (dedup disabled for privacy)",
+                style("🔒").dim()
+            );
+        }
+        let pass = rpassword::prompt_password("Passphrase: ")
+            .map_err(|e| error::Error::Io { source: e })?;
+        let confirm = rpassword::prompt_password("Confirm passphrase: ")
+            .map_err(|e| error::Error::Io { source: e })?;
+        if pass != confirm {
+            return Err(error::Error::InvalidArchive(
+                "passphrases do not match".into(),
+            ));
+        }
+        Some(pass.into_bytes())
+    } else {
+        None
+    };
 
     let opts = archive::CreateOptions {
         codec,
         level,
         show_progress: !quiet,
         respect_gitignore: !no_ignore,
+        passphrase,
     };
 
     let source_refs: Vec<&std::path::Path> = paths.iter().map(|p| p.as_path()).collect();
@@ -155,9 +174,15 @@ fn cmd_create(
     Ok(())
 }
 
-fn cmd_extract(archive: &PathBuf, dest: &PathBuf, quiet: bool) -> error::Result<()> {
+fn cmd_extract(archive: &PathBuf, dest: &PathBuf, encrypt: bool, quiet: bool) -> error::Result<()> {
     let start = Instant::now();
-    let stats = extract::extract_archive(archive.as_path(), dest.as_path())?;
+    let stats = if encrypt {
+        let pass = rpassword::prompt_password("Passphrase: ")
+            .map_err(|e| error::Error::Io { source: e })?;
+        extract::extract_archive_encrypted(archive.as_path(), dest.as_path(), pass.as_bytes())?
+    } else {
+        extract::extract_archive(archive.as_path(), dest.as_path())?
+    };
     let elapsed = start.elapsed();
 
     if !quiet {
@@ -272,31 +297,75 @@ fn cmd_info(archive: &PathBuf) -> error::Result<()> {
 
 fn cmd_verify(archive: &PathBuf, quiet: bool) -> error::Result<()> {
     let start = Instant::now();
-    let result = extract::verify_archive(archive.as_path())?;
+    let report = verify::verify_full(archive.as_path())?;
     let elapsed = start.elapsed();
 
     if !quiet {
-        if result.blocks_corrupted == 0 {
+        println!(
+            "\n{} Verify: {}",
+            if report.blocks_corrupted == 0 {
+                style("✓").green().bold()
+            } else {
+                style("✗").red().bold()
+            },
+            style(archive.display()).bold(),
+        );
+        println!(
+            "  Header: {}  Footer: {}  Index: {}",
+            if report.header_ok {
+                style("OK").green()
+            } else {
+                style("FAIL").red()
+            },
+            if report.footer_ok {
+                style("OK").green()
+            } else {
+                style("FAIL").red()
+            },
+            if report.index_ok {
+                style("OK").green()
+            } else {
+                style("FAIL").red()
+            },
+        );
+        println!(
+            "  Blocks: {}/{} OK, {} corrupted ({:.1}s)",
+            style(report.blocks_ok).green(),
+            report.blocks_checked,
+            if report.blocks_corrupted > 0 {
+                style(report.blocks_corrupted).red().bold()
+            } else {
+                style(0u64).green().bold()
+            },
+            elapsed.as_secs_f64(),
+        );
+
+        if !report.corrupted_blocks.is_empty() {
             println!(
-                "\n{} Archive OK — {} blocks verified in {:.1}s",
-                style("✓").green().bold(),
-                style(result.blocks_checked).bold(),
-                elapsed.as_secs_f64(),
+                "\n  {} Corrupted blocks:",
+                style("Damage map:").red().bold()
             );
-        } else {
-            println!(
-                "\n{} Archive CORRUPTED — {}/{} blocks damaged",
-                style("✗").red().bold(),
-                style(result.blocks_corrupted).red().bold(),
-                result.blocks_checked,
-            );
-            for file in &result.corrupted_files {
-                println!("  {} {}", style("✗").red(), file);
+            for block in &report.corrupted_blocks {
+                println!(
+                    "    offset {}: {} (expected {})",
+                    block.offset, block.error, block.expected_hash
+                );
             }
+        }
+
+        if !report.affected_files.is_empty() {
+            println!("\n  {} Affected files:", style("Impact:").red().bold());
+            for file in &report.affected_files {
+                println!("    {} {}", style("✗").red(), file);
+            }
+        }
+
+        if report.blocks_corrupted == 0 {
+            println!("\n  {} Archive integrity verified", style("✓").green());
         }
     }
 
-    if result.blocks_corrupted > 0 {
+    if report.blocks_corrupted > 0 {
         std::process::exit(1);
     }
 
