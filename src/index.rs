@@ -1,6 +1,6 @@
 use crate::compress;
 use crate::error::{Error, Result};
-use crate::format::{FileEntry, Hash, CODEC_ZSTD};
+use crate::format::{CODEC_ZSTD, FileEntry, Hash};
 use crate::hash::hash_block;
 
 /// Serialize the index (Vec<FileEntry>) to compressed msgpack bytes.

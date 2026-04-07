@@ -11,9 +11,7 @@ use crate::format::{FileEntry, FileType};
 pub fn capture_metadata(path: &Path, base: &Path) -> Result<FileEntry> {
     let meta = fs::symlink_metadata(path).map_err(|e| Error::io_path(path, e))?;
 
-    let relative = path
-        .strip_prefix(base)
-        .unwrap_or(path);
+    let relative = path.strip_prefix(base).unwrap_or(path);
 
     // Convert path to raw bytes
     #[cfg(unix)]
@@ -76,10 +74,8 @@ pub fn restore_metadata(path: &Path, entry: &FileEntry) -> Result<()> {
     // Restore mtime
     if entry.mtime_ns > 0 {
         let duration = std::time::Duration::from_nanos(entry.mtime_ns as u64);
-        let mtime = filetime::FileTime::from_unix_time(
-            duration.as_secs() as i64,
-            duration.subsec_nanos(),
-        );
+        let mtime =
+            filetime::FileTime::from_unix_time(duration.as_secs() as i64, duration.subsec_nanos());
         filetime::set_file_mtime(path, mtime).map_err(|e| Error::io_path(path, e))?;
     }
 

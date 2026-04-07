@@ -5,8 +5,9 @@ use crate::format::{CODEC_LZ4, CODEC_NONE, CODEC_ZSTD};
 pub fn compress(data: &[u8], codec: u8, level: i32) -> Result<Vec<u8>> {
     match codec {
         CODEC_NONE => Ok(data.to_vec()),
-        CODEC_ZSTD => zstd::bulk::compress(data, level)
-            .map_err(|e| Error::Compression(format!("zstd: {e}"))),
+        CODEC_ZSTD => {
+            zstd::bulk::compress(data, level).map_err(|e| Error::Compression(format!("zstd: {e}")))
+        }
         CODEC_LZ4 => Ok(lz4_flex::compress_prepend_size(data)),
         _ => Err(Error::UnknownCodec(codec)),
     }

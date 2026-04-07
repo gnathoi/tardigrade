@@ -172,8 +172,7 @@ pub fn extract_archive(archive_path: &Path, dest: &Path) -> Result<ExtractStats>
                 let link_target = dest.join(link_target_str.as_ref());
 
                 if link_target.exists() {
-                    fs::hard_link(&link_target, &target)
-                        .map_err(|e| Error::io_path(&target, e))?;
+                    fs::hard_link(&link_target, &target).map_err(|e| Error::io_path(&target, e))?;
                 }
 
                 stats.file_count += 1;
@@ -269,7 +268,7 @@ pub struct VerifyResult {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::archive::{create_archive, CreateOptions};
+    use crate::archive::{CreateOptions, create_archive};
     use tempfile::TempDir;
 
     #[test]
@@ -282,12 +281,7 @@ mod tests {
         let archive_dir = TempDir::new().unwrap();
         let archive_path = archive_dir.path().join("test.tg");
 
-        create_archive(
-            &archive_path,
-            &[src.path()],
-            &CreateOptions::default(),
-        )
-        .unwrap();
+        create_archive(&archive_path, &[src.path()], &CreateOptions::default()).unwrap();
 
         let dest = TempDir::new().unwrap();
         let stats = extract_archive(&archive_path, dest.path()).unwrap();
@@ -312,12 +306,8 @@ mod tests {
         let archive_dir = TempDir::new().unwrap();
         let archive_path = archive_dir.path().join("dedup.tg");
 
-        let create_stats = create_archive(
-            &archive_path,
-            &[src.path()],
-            &CreateOptions::default(),
-        )
-        .unwrap();
+        let create_stats =
+            create_archive(&archive_path, &[src.path()], &CreateOptions::default()).unwrap();
 
         assert!(create_stats.dedup_savings > 0);
 
@@ -338,12 +328,7 @@ mod tests {
         let archive_dir = TempDir::new().unwrap();
         let archive_path = archive_dir.path().join("list.tg");
 
-        create_archive(
-            &archive_path,
-            &[src.path()],
-            &CreateOptions::default(),
-        )
-        .unwrap();
+        create_archive(&archive_path, &[src.path()], &CreateOptions::default()).unwrap();
 
         let entries = list_archive(&archive_path).unwrap();
         assert!(!entries.is_empty());
@@ -359,12 +344,7 @@ mod tests {
         let archive_dir = TempDir::new().unwrap();
         let archive_path = archive_dir.path().join("verify.tg");
 
-        create_archive(
-            &archive_path,
-            &[src.path()],
-            &CreateOptions::default(),
-        )
-        .unwrap();
+        create_archive(&archive_path, &[src.path()], &CreateOptions::default()).unwrap();
 
         let result = verify_archive(&archive_path).unwrap();
         assert!(result.blocks_corrupted == 0);
@@ -379,12 +359,8 @@ mod tests {
         let archive_dir = TempDir::new().unwrap();
         let archive_path = archive_dir.path().join("empty.tg");
 
-        let stats = create_archive(
-            &archive_path,
-            &[src.path()],
-            &CreateOptions::default(),
-        )
-        .unwrap();
+        let stats =
+            create_archive(&archive_path, &[src.path()], &CreateOptions::default()).unwrap();
 
         assert_eq!(stats.file_count, 0);
         assert_eq!(stats.dir_count, 1);

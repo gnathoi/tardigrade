@@ -7,7 +7,6 @@
 ///
 /// `tdg log archive.tg` scans backward through footer chain to list generations.
 /// `tdg mount archive.tg@N` reads the Nth generation's index.
-
 use std::fs::File;
 use std::io::{BufReader, Read, Seek, SeekFrom};
 use std::path::Path;
@@ -44,8 +43,9 @@ pub fn list_snapshots(archive_path: &Path) -> Result<Vec<Snapshot>> {
         reader.seek(SeekFrom::Start(footer.index_offset))?;
         let mut index_data = vec![0u8; footer.index_length as usize];
         reader.read_exact(&mut index_data)?;
-        let entries = crate::index::deserialize_index(&index_data, footer.index_length as usize * 10)
-            .unwrap_or_default();
+        let entries =
+            crate::index::deserialize_index(&index_data, footer.index_length as usize * 10)
+                .unwrap_or_default();
 
         snapshots.push(Snapshot {
             generation,

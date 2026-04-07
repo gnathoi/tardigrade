@@ -6,7 +6,7 @@ use std::sync::atomic::Ordering;
 use rayon::prelude::*;
 use walkdir::WalkDir;
 
-use crate::chunk::{chunk_data, Chunk};
+use crate::chunk::{Chunk, chunk_data};
 use crate::compress;
 use crate::dedup::DedupStore;
 use crate::error::{Error, Result};
@@ -283,11 +283,7 @@ mod tests {
         fs::write(dir.path().join("hello.txt"), "Hello, tardigrade!").unwrap();
         fs::write(dir.path().join("world.txt"), "World data here.").unwrap();
         fs::create_dir(dir.path().join("subdir")).unwrap();
-        fs::write(
-            dir.path().join("subdir/nested.txt"),
-            "Nested file content.",
-        )
-        .unwrap();
+        fs::write(dir.path().join("subdir/nested.txt"), "Nested file content.").unwrap();
         dir
     }
 
@@ -296,12 +292,8 @@ mod tests {
         let test_dir = create_test_dir();
         let archive_path = test_dir.path().join("test.tg");
 
-        let stats = create_archive(
-            &archive_path,
-            &[test_dir.path()],
-            &CreateOptions::default(),
-        )
-        .unwrap();
+        let stats =
+            create_archive(&archive_path, &[test_dir.path()], &CreateOptions::default()).unwrap();
 
         assert!(archive_path.exists());
         assert!(stats.archive_size > 0);
@@ -318,12 +310,8 @@ mod tests {
         fs::write(dir.path().join("file3.txt"), &data).unwrap();
 
         let archive_path = dir.path().join("dedup.tg");
-        let stats = create_archive(
-            &archive_path,
-            &[dir.path()],
-            &CreateOptions::default(),
-        )
-        .unwrap();
+        let stats =
+            create_archive(&archive_path, &[dir.path()], &CreateOptions::default()).unwrap();
 
         assert!(stats.dedup_savings > 0);
         assert_eq!(stats.unique_blocks, 1);
@@ -336,12 +324,7 @@ mod tests {
         fs::write(dir.path().join("a.txt"), "data").unwrap();
         let archive_path = dir.path().join("magic.tg");
 
-        create_archive(
-            &archive_path,
-            &[dir.path()],
-            &CreateOptions::default(),
-        )
-        .unwrap();
+        create_archive(&archive_path, &[dir.path()], &CreateOptions::default()).unwrap();
 
         let bytes = fs::read(&archive_path).unwrap();
         assert_eq!(&bytes[..4], b"TRDG");
@@ -360,12 +343,8 @@ mod tests {
         }
 
         let archive_path = dir.path().join("parallel.tg");
-        let stats = create_archive(
-            &archive_path,
-            &[dir.path()],
-            &CreateOptions::default(),
-        )
-        .unwrap();
+        let stats =
+            create_archive(&archive_path, &[dir.path()], &CreateOptions::default()).unwrap();
 
         assert_eq!(stats.file_count, 20);
 

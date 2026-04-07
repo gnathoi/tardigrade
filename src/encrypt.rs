@@ -1,6 +1,6 @@
 use chacha20poly1305::{
-    aead::{Aead, KeyInit},
     ChaCha20Poly1305, Nonce,
+    aead::{Aead, KeyInit},
 };
 use std::io::{Read, Write};
 
@@ -57,7 +57,11 @@ pub fn encrypt_block(data: &[u8], key: &SymmetricKey, content_hash: &Hash) -> Re
 
 /// Decrypt a block of data using ChaCha20-Poly1305.
 /// Nonce is derived from the BLAKE3 content hash (first 12 bytes).
-pub fn decrypt_block(ciphertext: &[u8], key: &SymmetricKey, content_hash: &Hash) -> Result<Vec<u8>> {
+pub fn decrypt_block(
+    ciphertext: &[u8],
+    key: &SymmetricKey,
+    content_hash: &Hash,
+) -> Result<Vec<u8>> {
     let cipher = ChaCha20Poly1305::new(key.into());
     let nonce = Nonce::from_slice(&content_hash[..12]);
 

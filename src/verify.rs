@@ -49,7 +49,9 @@ pub fn verify_full(archive_path: &Path) -> Result<VerifyReport> {
     match ArchiveHeader::read_from(&mut reader) {
         Ok(_) => report.header_ok = true,
         Err(e) => {
-            return Err(Error::InvalidArchive(format!("header verification failed: {e}")));
+            return Err(Error::InvalidArchive(format!(
+                "header verification failed: {e}"
+            )));
         }
     }
 
@@ -60,7 +62,9 @@ pub fn verify_full(archive_path: &Path) -> Result<VerifyReport> {
             f
         }
         Err(e) => {
-            return Err(Error::InvalidArchive(format!("footer verification failed: {e}")));
+            return Err(Error::InvalidArchive(format!(
+                "footer verification failed: {e}"
+            )));
         }
     };
 
@@ -71,7 +75,9 @@ pub fn verify_full(archive_path: &Path) -> Result<VerifyReport> {
             e
         }
         Err(e) => {
-            return Err(Error::InvalidArchive(format!("index verification failed: {e}")));
+            return Err(Error::InvalidArchive(format!(
+                "index verification failed: {e}"
+            )));
         }
     };
 
@@ -112,13 +118,18 @@ pub fn verify_full(archive_path: &Path) -> Result<VerifyReport> {
     Ok(report)
 }
 
-fn verify_block(reader: &mut (impl Read + Seek), offset: u64) -> std::result::Result<(), CorruptedBlock> {
-    reader.seek(SeekFrom::Start(offset)).map_err(|e| CorruptedBlock {
-        offset,
-        expected_hash: String::new(),
-        actual_hash: String::new(),
-        error: format!("seek failed: {e}"),
-    })?;
+fn verify_block(
+    reader: &mut (impl Read + Seek),
+    offset: u64,
+) -> std::result::Result<(), CorruptedBlock> {
+    reader
+        .seek(SeekFrom::Start(offset))
+        .map_err(|e| CorruptedBlock {
+            offset,
+            expected_hash: String::new(),
+            actual_hash: String::new(),
+            error: format!("seek failed: {e}"),
+        })?;
 
     let header = BlockHeader::read_from(reader).map_err(|e| CorruptedBlock {
         offset,
@@ -128,15 +139,18 @@ fn verify_block(reader: &mut (impl Read + Seek), offset: u64) -> std::result::Re
     })?;
 
     let mut compressed = vec![0u8; header.compressed_size as usize];
-    reader.read_exact(&mut compressed).map_err(|e| CorruptedBlock {
-        offset,
-        expected_hash: hex::encode(header.hash),
-        actual_hash: String::new(),
-        error: format!("read failed: {e}"),
-    })?;
-
-    let data = crate::compress::decompress(&compressed, header.codec, header.uncompressed_size as usize)
+    reader
+        .read_exact(&mut compressed)
         .map_err(|e| CorruptedBlock {
+            offset,
+            expected_hash: hex::encode(header.hash),
+            actual_hash: String::new(),
+            error: format!("read failed: {e}"),
+        })?;
+
+    let data =
+        crate::compress::decompress(&compressed, header.codec, header.uncompressed_size as usize)
+            .map_err(|e| CorruptedBlock {
             offset,
             expected_hash: hex::encode(header.hash),
             actual_hash: String::new(),

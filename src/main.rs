@@ -25,7 +25,7 @@ use std::time::Instant;
 
 use clap::Parser;
 use console::style;
-use humansize::{format_size, BINARY};
+use humansize::{BINARY, format_size};
 
 use cli::{Cli, Command};
 
@@ -121,7 +121,9 @@ fn cmd_create(
             println!(
                 "  {} {} saved by dedup",
                 style("↗").green(),
-                style(format_size(stats.dedup_savings, BINARY)).green().bold(),
+                style(format_size(stats.dedup_savings, BINARY))
+                    .green()
+                    .bold(),
             );
         }
 
@@ -184,10 +186,7 @@ fn cmd_list(archive: &PathBuf, long: bool) -> error::Result<()> {
     }
 
     if long {
-        println!(
-            "\n{} entries",
-            style(entries.len()).bold()
-        );
+        println!("\n{} entries", style(entries.len()).bold());
     }
 
     Ok(())
@@ -248,10 +247,7 @@ fn cmd_info(archive: &PathBuf) -> error::Result<()> {
         flags.push("none");
     }
     println!("  Flags:         {}", flags.join(", "));
-    println!(
-        "  Root hash:     {}",
-        hex::encode(&footer.root_hash[..8])
-    );
+    println!("  Root hash:     {}", hex::encode(&footer.root_hash[..8]));
 
     Ok(())
 }

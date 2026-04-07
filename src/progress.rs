@@ -1,8 +1,8 @@
-use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::Arc;
+use std::sync::atomic::{AtomicU64, Ordering};
 
 use console::style;
-use humansize::{format_size, BINARY};
+use humansize::{BINARY, format_size};
 use indicatif::{MultiProgress, ProgressBar, ProgressStyle};
 
 /// Progress tracking for archive creation
@@ -41,11 +41,9 @@ impl CreateProgress {
     pub fn new(total_bytes: u64) -> Self {
         let multi = MultiProgress::new();
 
-        let scan_style = ProgressStyle::with_template(
-            "  {spinner:.cyan} Scanning...  {msg}",
-        )
-        .unwrap()
-        .tick_chars("⠋⠙⠹⠸⠼⠴⠦⠧⠇⠏");
+        let scan_style = ProgressStyle::with_template("  {spinner:.cyan} Scanning...  {msg}")
+            .unwrap()
+            .tick_chars("⠋⠙⠹⠸⠼⠴⠦⠧⠇⠏");
 
         let scan_bar = multi.add(ProgressBar::new_spinner());
         scan_bar.set_style(scan_style);
@@ -101,16 +99,10 @@ impl CreateProgress {
             0.0
         };
 
-        let mut msg = format!(
-            "Ratio: {:.1}x",
-            ratio,
-        );
+        let mut msg = format!("Ratio: {:.1}x", ratio,);
 
         if dedup > 0 {
-            msg.push_str(&format!(
-                "  Dedup: {} saved",
-                format_size(dedup, BINARY)
-            ));
+            msg.push_str(&format!("  Dedup: {} saved", format_size(dedup, BINARY)));
         }
 
         self.compress_bar.set_message(msg);

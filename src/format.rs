@@ -131,15 +131,15 @@ impl ArchiveHeader {
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct BlockHeader {
-    pub hash: Hash,           // BLAKE3 of uncompressed data (32)
-    pub compressed_size: u32, // (4)
+    pub hash: Hash,             // BLAKE3 of uncompressed data (32)
+    pub compressed_size: u32,   // (4)
     pub uncompressed_size: u32, // (4)
-    pub codec: u8,            // (1)
-    pub flags: u8,            // (1)
-    pub ecc_shard_count: u8,  // (1)
-    pub reserved: u8,         // (1)
-    pub checksum: u32,        // CRC32 of first 44 bytes (4)
-}                             // total = 48
+    pub codec: u8,              // (1)
+    pub flags: u8,              // (1)
+    pub ecc_shard_count: u8,    // (1)
+    pub reserved: u8,           // (1)
+    pub checksum: u32,          // CRC32 of first 44 bytes (4)
+} // total = 48
 
 impl BlockHeader {
     pub fn new(hash: Hash, compressed_size: u32, uncompressed_size: u32, codec: u8) -> Self {
@@ -236,17 +236,17 @@ impl FileEntry {
 pub enum FileType {
     File,
     Directory,
-    Symlink(Vec<u8>), // target path as raw bytes
+    Symlink(Vec<u8>),  // target path as raw bytes
     Hardlink(Vec<u8>), // target path as raw bytes
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct BlockRef {
     pub hash: Hash,
-    pub offset: u64,       // offset of block in archive
-    pub slice_start: u32,  // offset within decompressed block
-    pub slice_len: u32,    // length within decompressed block
-    pub flags: u8,         // BLOCKREF_FLAG_EXTERNAL for incremental
+    pub offset: u64,      // offset of block in archive
+    pub slice_start: u32, // offset within decompressed block
+    pub slice_len: u32,   // length within decompressed block
+    pub flags: u8,        // BLOCKREF_FLAG_EXTERNAL for incremental
     pub reserved: [u8; 3],
 }
 
