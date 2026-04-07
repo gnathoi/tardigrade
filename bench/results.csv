@@ -1,0 +1,13 @@
+tool,dataset,operation,time_ms,input_mb,output_mb,ratio
+tdg,small_files,create,23,1.95,0.10,19.23
+tar+zstd,small_files,create,167,1.95,0.02,100.00
+tdg,small_files,extract,57,1.95,,,
+tar+zstd,small_files,extract,146,1.95,,,
+tdg,mixed_dedup,create,23,18.99,3.96,4.79
+tar+zstd,mixed_dedup,create,42,18.99,5.09,3.73
+tdg,mixed_dedup,extract,25,18.99,,,
+tar+zstd,mixed_dedup,extract,50,18.99,,,
+tdg,large_text,create,35,72.59,0.02,3097.33
+tar+zstd,large_text,create,43,72.59,0.06,1161.50
+tdg,large_text,extract,64,72.59,,,
+tar+zstd,large_text,extract,74,72.59,,,
