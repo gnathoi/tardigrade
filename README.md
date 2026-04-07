@@ -1,48 +1,58 @@
-```
-                                                                
-                           :+xXXXXXxXXX+                        
-              :+Xxxxx+xxxXXxxx++xx++xXx+xxxx+                   
-            xxxx++++++++++++xxX;;;++++xx+;++;+XX.               
-          Xxxxxxx++x+;;;;;;;+++xx;;;;;;++X::;;;xXXx             
-        +xxxx+++++++++;:;;;;;;;+++x:;;;;;;x;:;;;xxx+x           
-      +Xxxx+++++;++;;;;;.:;;;;;;;;;+::;;;;;+;;;:;xxx;++         
-     xX++++++;;;;;;;;;;;.:;;;;:;;;;;;.:;;;;;+;;;:+x+;;x         
-    :X++;;;;;:;;;;;;;;;;: :;;;;;;;;;;.::;;;;;+:::;;x::;X        
-    xx+;;;;..;;;;;:::;;;: .:;;;;;;;;;.:::;;;;;+:::;x::;x.       
-   .x+;;;: :;;;;::::;;::: .;;;;;;;;;; .:::;;;;+.::;+..:;+       
-    x;:;::.;;;::::::::::. :;;;;;::;;; .:::;;;;+:::+x .:x+       
-    ++x;;::::;:::::::::. .::;;:::::;. .:::;:;;+:.::+;.:;;       
-     ;: .:..:;::;:::::.  ::;;::::::: ...::::;;+:.:;++..:+       
-     x;++:;::;::;:::::...;::.::;::+......::::;;..:::+.:;+       
-    x;;:+;;:::;::;xx++++;;::;;;;;;;.:...::::::;...::+:::;       
-     ;::::.:;.;:..:;     :;;;;::::+;:;::::::;;;..::;  :         
-     ;;::::;   ::.        +;;:::::     .::::+    ..             
-      ..:.                 :;;::         :..                    
-                            . ..                                
-```
+<p align="center">
+<pre align="center">
+                       :+xXXXXXxXXX+
+          :+Xxxxx+xxxXXxxx++xx++xXx+xxxx+
+        xxxx++++++++++++xxX;;;++++xx+;++;+XX.
+      Xxxxxxx++x+;;;;;;;+++xx;;;;;;++X::;;;xXXx
+    +xxxx+++++++++;:;;;;;;;+++x:;;;;;;x;:;;;xxx+x
+  +Xxxx+++++;++;;;;;.:;;;;;;;;;+::;;;;;+;;;:;xxx;++
+ xX++++++;;;;;;;;;;;.:;;;;:;;;;;;.:;;;;;+;;;:+x+;;x
+:X++;;;;;:;;;;;;;;;;: :;;;;;;;;;;.::;;;;;+:::;;x::;X
+xx+;;;;..;;;;;:::;;;: .:;;;;;;;;;.:::;;;;;+:::;x::;x.
+x+;;;: :;;;;::::;;::: .;;;;;;;;;; .:::;;;;+.::;+..:;+
+ x;:;::.;;;::::::::::. :;;;;;::;;; .:::;;;;+:::+x .:x+
+ ++x;;::::;:::::::::. .::;;:::::;. .:::;:;;+:.::+;.:;;
+  ;: .:..:;::;:::::.  ::;;::::::: ...::::;;+:.:;++..:+
+  x;++:;::;::;:::::...;::.::;::+......::::;;..:::+.:;+
+ x;;:+;;:::;::;xx++++;;::;;;;;;;.:...::::::;...::+:::;
+  ;::::.:;.;:..:;     :;;;;::::+;:;::::::;;;..::;  :
+  ;;::::;   ::.        +;;:::::     .::::+    ..
+   ..:.                 :;;::         :..
+                         . ..
+</pre>
+</p>
 
-# tardigrade
+<h1 align="center">tardigrade</h1>
 
-**Modern archiving for modern systems.** tar, but for 2026.
-
+<p align="center">
+<strong>Modern archiving for modern systems.</strong> tar, but for 2026.<br>
 Fast, multithreaded, content-addressed, encrypted, and beautiful.
+</p>
 
-[![CI](https://github.com/gnathoi/tardigrade/actions/workflows/ci.yml/badge.svg)](https://github.com/gnathoi/tardigrade/actions/workflows/ci.yml)
+<p align="center">
+<a href="https://github.com/gnathoi/tardigrade/actions/workflows/ci.yml"><img src="https://github.com/gnathoi/tardigrade/actions/workflows/ci.yml/badge.svg" alt="CI"></a>
+</p>
+
+<p align="center">
+<code>11x faster</code> than tar+zstd on source code &nbsp;|&nbsp; <code>78% smaller</code> archives with dedup &nbsp;|&nbsp; <code>2 GB/s</code> throughput
+</p>
+
+---
 
 ## Why
 
-tar is 45 years old. It has no checksums, no dedup, no seekability, single-threaded compression, and a mess of incompatible extensions. tardigrade is what you'd build if you started from scratch with modern hardware, modern algorithms, and modern expectations.
+tar is 45 years old. No checksums, no dedup, no seekability, single-threaded compression, and a mess of incompatible extensions. tardigrade is what you'd build if you started from scratch today.
 
 ## Features
 
-- **Parallel compression** — zstd and lz4 via rayon, saturates all cores
+- **11x faster** — parallel zstd/lz4 compression via rayon, saturates all cores
 - **Content-addressed dedup** — identical blocks stored once. Archive 3 copies of `node_modules` and pay for 1
-- **BLAKE3 checksums** — every block verified on read. Corruption detected immediately
-- **Encrypted archives** — ChaCha20-Poly1305 AEAD with passphrase key wrapping
+- **BLAKE3 integrity** — every block checksummed and verified on read
+- **Encrypted** — ChaCha20-Poly1305 AEAD with passphrase key wrapping
 - **Beautiful CLI** — progress bars, throughput, compression ratios, dedup savings
 - **.gitignore-aware** — automatically skips `target/`, `node_modules/`, `.git/`
-- **Content-defined chunking** — FastCDC for dedup that works across modified files, not just identical ones
-- **Integrity verification** — `tdg verify` checks every block with detailed damage mapping
+- **Content-defined chunking** — FastCDC dedup works across modified files, not just identical ones
+- **Detailed verification** — `tdg verify` checks every block with damage mapping
 - **Cross-platform** — Linux, macOS, Windows
 
 ## Install
