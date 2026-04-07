@@ -7,21 +7,17 @@ import os
 import matplotlib
 matplotlib.use('Agg')
 import matplotlib.pyplot as plt
-import matplotlib.ticker as ticker
+import numpy as np
 
 DATASET_LABELS = {
-    'small_files': 'Small Files\n(500 source files)',
-    'mixed_dedup': 'Mixed + Duplicates\n(binary, 30 copies)',
-    'large_text': 'Large Text\n(10 files, compressible)',
-    'source_project': 'Source Project\n(270 files, mixed sizes)',
-    'dedup_heavy': 'Heavy Dedup\n(5 packages, shared deps)',
-    'large_mixed': 'Large Mixed\n(logs + binaries + copies)',
+    'source_project': 'Source Project\n(270 files, 5 MB)',
+    'dedup_heavy': 'Heavy Dedup\n(shared deps, 13 MB)',
+    'large_mixed': 'Large Mixed\n(logs+bins, 102 MB)',
 }
 
-COLORS = {
-    'tdg': '#4CAF50',
-    'tar+zstd': '#78909C',
-}
+TDG_COLOR = '#22c55e'   # green
+TAR_COLOR = '#94a3b8'   # slate gray
+ACCENT = '#f59e0b'      # amber for highlights
 
 def load_csv(path):
     rows = []
@@ -32,131 +28,118 @@ def load_csv(path):
             rows.append(row)
     return rows
 
+def setup_ax(ax):
+    """Transparent background, clean look for GitHub light+dark."""
+    ax.set_facecolor('none')
+    ax.spines['top'].set_visible(False)
+    ax.spines['right'].set_visible(False)
+    ax.spines['bottom'].set_color('#666')
+    ax.spines['left'].set_color('#666')
+    ax.tick_params(colors='#666')
+
 def plot_speed(rows, output_dir):
-    """Bar chart: create and extract times."""
-    fig, (ax1, ax2) = plt.subplots(1, 2, figsize=(12, 5))
-    fig.patch.set_facecolor('#0d1117')
+    """Grouped bar chart: create and extract times side by side."""
+    datasets = [d for d in DATASET_LABELS if any(r['dataset'] == d for r in rows)]
 
-    for ax, op, title in [(ax1, 'create', 'Archive Creation'), (ax2, 'extract', 'Extraction')]:
-        ax.set_facecolor('#161b22')
-        datasets = list(DATASET_LABELS.keys())
-        x = range(len(datasets))
-        width = 0.35
+    fig, axes = plt.subplots(1, 2, figsize=(11, 4.5))
+    fig.patch.set_alpha(0)
 
-        tdg_times = []
-        tar_times = []
-        for ds in datasets:
-            tdg = [r for r in rows if r['tool'] == 'tdg' and r['dataset'] == ds and r['operation'] == op]
-            tar = [r for r in rows if r['tool'] == 'tar+zstd' and r['dataset'] == ds and r['operation'] == op]
-            tdg_times.append(tdg[0]['time_ms'] if tdg else 0)
-            tar_times.append(tar[0]['time_ms'] if tar else 0)
+    for ax, op, title in [(axes[0], 'create', 'Create'), (axes[1], 'extract', 'Extract')]:
+        setup_ax(ax)
+        x = np.arange(len(datasets))
+        w = 0.32
 
-        bars1 = ax.bar([i - width/2 for i in x], tdg_times, width, label='tdg', color=COLORS['tdg'], edgecolor='none')
-        bars2 = ax.bar([i + width/2 for i in x], tar_times, width, label='tar+zstd', color=COLORS['tar+zstd'], edgecolor='none')
+        tdg_t = [next((r['time_ms'] for r in rows if r['tool']=='tdg' and r['dataset']==d and r['operation']==op), 0) for d in datasets]
+        tar_t = [next((r['time_ms'] for r in rows if r['tool']=='tar+zstd' and r['dataset']==d and r['operation']==op), 0) for d in datasets]
 
-        # Add value labels
-        for bar in bars1:
-            ax.text(bar.get_x() + bar.get_width()/2, bar.get_height() + 1,
-                    f'{int(bar.get_height())}ms', ha='center', va='bottom',
-                    fontsize=9, color='#c9d1d9', fontweight='bold')
-        for bar in bars2:
-            ax.text(bar.get_x() + bar.get_width()/2, bar.get_height() + 1,
-                    f'{int(bar.get_height())}ms', ha='center', va='bottom',
-                    fontsize=9, color='#c9d1d9')
+        bars1 = ax.bar(x - w/2, tdg_t, w, label='tdg', color=TDG_COLOR, edgecolor='none', zorder=3)
+        bars2 = ax.bar(x + w/2, tar_t, w, label='tar+zstd', color=TAR_COLOR, edgecolor='none', zorder=3)
 
-        ax.set_xlabel('')
-        ax.set_ylabel('Time (ms)', color='#8b949e')
-        ax.set_title(title, color='#c9d1d9', fontsize=14, fontweight='bold')
-        ax.set_xticks(list(x))
-        ax.set_xticklabels([DATASET_LABELS[ds] for ds in datasets], fontsize=8, color='#8b949e')
-        ax.tick_params(axis='y', colors='#8b949e')
-        ax.legend(facecolor='#161b22', edgecolor='#30363d', labelcolor='#c9d1d9')
-        ax.spines['top'].set_visible(False)
-        ax.spines['right'].set_visible(False)
-        ax.spines['bottom'].set_color('#30363d')
-        ax.spines['left'].set_color('#30363d')
+        # Value labels
+        for bars, bold in [(bars1, True), (bars2, False)]:
+            for bar in bars:
+                h = bar.get_height()
+                ax.text(bar.get_x() + bar.get_width()/2, h + max(tar_t)*0.02,
+                        f'{int(h)}ms', ha='center', va='bottom', fontsize=9,
+                        color='#333', fontweight='bold' if bold else 'normal')
 
-    fig.suptitle('tardigrade vs tar+zstd — Speed', color='#c9d1d9', fontsize=16, fontweight='bold', y=1.02)
+        # Speedup annotations
+        for i in range(len(datasets)):
+            if tar_t[i] > 0 and tdg_t[i] > 0:
+                speedup = tar_t[i] / tdg_t[i]
+                if speedup > 1.3:
+                    ax.annotate(f'{speedup:.1f}x faster',
+                                xy=(x[i], 0), xytext=(x[i], max(tar_t)*0.85),
+                                ha='center', fontsize=8, color=TDG_COLOR, fontweight='bold',
+                                arrowprops=dict(arrowstyle='-', color=TDG_COLOR, alpha=0.3))
+
+        ax.set_xticks(x)
+        ax.set_xticklabels([DATASET_LABELS[d] for d in datasets], fontsize=8, color='#555')
+        ax.set_ylabel('Time (ms)', color='#555')
+        ax.set_title(title, fontsize=13, fontweight='bold', color='#333')
+        ax.legend(fontsize=9, framealpha=0.5)
+        ax.set_ylim(0, max(max(tdg_t), max(tar_t)) * 1.25)
+        ax.grid(axis='y', alpha=0.2, zorder=0)
+
+    fig.suptitle('tardigrade vs tar+zstd — Speed (lower is better)',
+                 fontsize=14, fontweight='bold', color='#333')
     fig.tight_layout()
     fig.savefig(os.path.join(output_dir, 'bench-speed.svg'), format='svg',
-                bbox_inches='tight', facecolor=fig.get_facecolor(), edgecolor='none')
+                bbox_inches='tight', transparent=True)
     plt.close(fig)
 
 def plot_size(rows, output_dir):
-    """Bar chart: archive sizes and compression ratios."""
-    fig, (ax1, ax2) = plt.subplots(1, 2, figsize=(12, 5))
-    fig.patch.set_facecolor('#0d1117')
+    """Horizontal bar chart: archive sizes with dedup savings highlighted."""
+    datasets = [d for d in DATASET_LABELS if any(r['dataset'] == d for r in rows)]
 
-    datasets = list(DATASET_LABELS.keys())
-    x = range(len(datasets))
-    width = 0.35
+    fig, ax = plt.subplots(figsize=(9, 4))
+    fig.patch.set_alpha(0)
+    setup_ax(ax)
 
-    # Archive size
-    ax1.set_facecolor('#161b22')
+    y = np.arange(len(datasets))
+    h = 0.3
+
     tdg_sizes = []
     tar_sizes = []
     input_sizes = []
-    for ds in datasets:
-        tdg = [r for r in rows if r['tool'] == 'tdg' and r['dataset'] == ds and r['operation'] == 'create']
-        tar = [r for r in rows if r['tool'] == 'tar+zstd' and r['dataset'] == ds and r['operation'] == 'create']
-        tdg_sizes.append(float(tdg[0]['output_mb']) if tdg and tdg[0]['output_mb'] else 0)
-        tar_sizes.append(float(tar[0]['output_mb']) if tar and tar[0]['output_mb'] else 0)
-        input_sizes.append(float(tdg[0]['input_mb']) if tdg else 0)
+    for d in datasets:
+        tdg = next((r for r in rows if r['tool']=='tdg' and r['dataset']==d and r['operation']=='create'), None)
+        tar = next((r for r in rows if r['tool']=='tar+zstd' and r['dataset']==d and r['operation']=='create'), None)
+        tdg_sizes.append(float(tdg['output_mb']) if tdg and tdg['output_mb'] else 0)
+        tar_sizes.append(float(tar['output_mb']) if tar and tar['output_mb'] else 0)
+        input_sizes.append(float(tdg['input_mb']) if tdg else 0)
 
-    bars_input = ax1.bar([i for i in x], input_sizes, width*2.2, label='Input', color='#1f6feb', alpha=0.3, edgecolor='none')
-    bars1 = ax1.bar([i - width/2 for i in x], tdg_sizes, width, label='tdg', color=COLORS['tdg'], edgecolor='none')
-    bars2 = ax1.bar([i + width/2 for i in x], tar_sizes, width, label='tar+zstd', color=COLORS['tar+zstd'], edgecolor='none')
+    # Input size as faint background
+    ax.barh(y, input_sizes, h*2.5, color='#e2e8f0', edgecolor='none', zorder=1, label='Input')
+    ax.barh(y + h/2, tar_sizes, h, color=TAR_COLOR, edgecolor='none', zorder=2, label='tar+zstd')
+    ax.barh(y - h/2, tdg_sizes, h, color=TDG_COLOR, edgecolor='none', zorder=2, label='tdg')
 
-    ax1.set_ylabel('Size (MB)', color='#8b949e')
-    ax1.set_title('Archive Size', color='#c9d1d9', fontsize=14, fontweight='bold')
-    ax1.set_xticks(list(x))
-    ax1.set_xticklabels([DATASET_LABELS[ds] for ds in datasets], fontsize=8, color='#8b949e')
-    ax1.tick_params(axis='y', colors='#8b949e')
-    ax1.legend(facecolor='#161b22', edgecolor='#30363d', labelcolor='#c9d1d9')
-    ax1.spines['top'].set_visible(False)
-    ax1.spines['right'].set_visible(False)
-    ax1.spines['bottom'].set_color('#30363d')
-    ax1.spines['left'].set_color('#30363d')
+    # Labels
+    for i in range(len(datasets)):
+        ax.text(tdg_sizes[i] + max(input_sizes)*0.01, y[i] - h/2,
+                f' {tdg_sizes[i]:.1f} MB', va='center', fontsize=9, color='#333', fontweight='bold')
+        ax.text(tar_sizes[i] + max(input_sizes)*0.01, y[i] + h/2,
+                f' {tar_sizes[i]:.1f} MB', va='center', fontsize=9, color='#666')
 
-    # Compression ratio
-    ax2.set_facecolor('#161b22')
-    tdg_ratios = []
-    tar_ratios = []
-    for ds in datasets:
-        tdg = [r for r in rows if r['tool'] == 'tdg' and r['dataset'] == ds and r['operation'] == 'create']
-        tar = [r for r in rows if r['tool'] == 'tar+zstd' and r['dataset'] == ds and r['operation'] == 'create']
-        tdg_ratios.append(float(tdg[0]['ratio']) if tdg and tdg[0]['ratio'] else 0)
-        tar_ratios.append(float(tar[0]['ratio']) if tar and tar[0]['ratio'] else 0)
+        # Savings callout
+        if tar_sizes[i] > 0:
+            pct = (1 - tdg_sizes[i]/tar_sizes[i]) * 100
+            if pct > 5:
+                ax.text(max(input_sizes)*0.95, y[i],
+                        f'{pct:.0f}% smaller', ha='right', va='center',
+                        fontsize=9, color=TDG_COLOR, fontweight='bold',
+                        bbox=dict(boxstyle='round,pad=0.3', facecolor='white', edgecolor=TDG_COLOR, alpha=0.8))
 
-    bars1 = ax2.bar([i - width/2 for i in x], tdg_ratios, width, label='tdg', color=COLORS['tdg'], edgecolor='none')
-    bars2 = ax2.bar([i + width/2 for i in x], tar_ratios, width, label='tar+zstd', color=COLORS['tar+zstd'], edgecolor='none')
+    ax.set_yticks(y)
+    ax.set_yticklabels([DATASET_LABELS[d] for d in datasets], fontsize=9, color='#555')
+    ax.set_xlabel('Size (MB)', color='#555')
+    ax.set_title('Archive Size (smaller is better)', fontsize=13, fontweight='bold', color='#333')
+    ax.legend(fontsize=9, loc='lower right', framealpha=0.5)
+    ax.grid(axis='x', alpha=0.2, zorder=0)
 
-    for bar in bars1:
-        if bar.get_height() > 0:
-            ax2.text(bar.get_x() + bar.get_width()/2, bar.get_height() + 0.1,
-                    f'{bar.get_height():.1f}x', ha='center', va='bottom',
-                    fontsize=9, color='#c9d1d9', fontweight='bold')
-    for bar in bars2:
-        if bar.get_height() > 0:
-            ax2.text(bar.get_x() + bar.get_width()/2, bar.get_height() + 0.1,
-                    f'{bar.get_height():.1f}x', ha='center', va='bottom',
-                    fontsize=9, color='#c9d1d9')
-
-    ax2.set_ylabel('Compression Ratio', color='#8b949e')
-    ax2.set_title('Compression Ratio (higher is better)', color='#c9d1d9', fontsize=14, fontweight='bold')
-    ax2.set_xticks(list(x))
-    ax2.set_xticklabels([DATASET_LABELS[ds] for ds in datasets], fontsize=8, color='#8b949e')
-    ax2.tick_params(axis='y', colors='#8b949e')
-    ax2.legend(facecolor='#161b22', edgecolor='#30363d', labelcolor='#c9d1d9')
-    ax2.spines['top'].set_visible(False)
-    ax2.spines['right'].set_visible(False)
-    ax2.spines['bottom'].set_color('#30363d')
-    ax2.spines['left'].set_color('#30363d')
-
-    fig.suptitle('tardigrade vs tar+zstd — Size & Compression', color='#c9d1d9', fontsize=16, fontweight='bold', y=1.02)
     fig.tight_layout()
     fig.savefig(os.path.join(output_dir, 'bench-size.svg'), format='svg',
-                bbox_inches='tight', facecolor=fig.get_facecolor(), edgecolor='none')
+                bbox_inches='tight', transparent=True)
     plt.close(fig)
 
 if __name__ == '__main__':
@@ -167,4 +150,4 @@ if __name__ == '__main__':
     rows = load_csv(csv_path)
     plot_speed(rows, output_dir)
     plot_size(rows, output_dir)
-    print(f"Plots saved to {output_dir}/bench-speed.svg and {output_dir}/bench-size.svg")
+    print(f"Plots saved to {output_dir}/")

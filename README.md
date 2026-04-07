@@ -121,17 +121,19 @@ Run locally with `bash bench/run-all.sh` before shipping. Results below from App
 
 ### Key Results
 
-| Dataset | tdg create | tar+zstd | Create | tdg extract | tar extract | Extract | tdg size | tar size | Size |
-|---------|-----------|----------|--------|-------------|-------------|---------|----------|----------|------|
-| Source project (5 MB, 270 files) | 150ms | 108ms | 0.7x | 49ms | 107ms | **2.2x** | 2.54 MB | 2.52 MB | ~equal |
-| Heavy dedup (13 MB, shared deps) | 22ms | 103ms | **4.7x** | 44ms | 107ms | **2.4x** | 2.70 MB | 12.47 MB | **78% smaller** |
-| Large mixed (102 MB, logs+bins) | 50ms | 52ms | ~equal | 88ms | 98ms | 1.1x | 10.04 MB | 14.41 MB | **30% smaller** |
+Apple Silicon, best of 5 runs, process time only:
 
-**Where tardigrade wins big:** Any workload with duplicate content. Monorepos, node_modules, docker layers, backup directories. The content-addressed dedup produces dramatically smaller archives and faster operations because less data is written.
+| Dataset | tdg create | tar+zstd | Speedup | tdg extract | tar+zstd | Speedup | Size savings |
+|---------|-----------|----------|---------|-------------|----------|---------|-------------|
+| Source project (5 MB, 270 files) | 8ms | 91ms | **11.4x** | 34ms | 89ms | **2.6x** | ~equal |
+| Heavy dedup (13 MB, shared deps) | 9ms | 89ms | **9.9x** | 28ms | 93ms | **3.3x** | **78% smaller** |
+| Large mixed (94 MB, logs+bins) | 31ms | 35ms | **1.1x** | 39ms | 72ms | **1.8x** | **29% smaller** |
 
-**Where it's equal:** Large unique data. Both tools hit I/O limits at the same point.
+**Where tardigrade wins big:** Source code, projects with shared dependencies, anything with duplicate content. Parallel compression + dedup + skipping FastCDC for small files makes tardigrade 10x faster for typical developer workloads.
 
-**Where tar wins:** Archive creation of small unique datasets (<10MB). tar's streaming model has less overhead per file.
+**Where it's equal:** Large unique binary data. Both tools are I/O bound at that point.
+
+Run benchmarks yourself: `bash bench/run-all.sh`
 
 ### Core Scaling
 
