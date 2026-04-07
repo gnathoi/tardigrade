@@ -41,7 +41,7 @@ mod tests {
                 mode: 0o644,
                 uid: 1000,
                 gid: 1000,
-                mtime_ns: 1700000000_000000000,
+                mtime_ns: 1_700_000_000_000_000_000,
                 size: 42,
                 block_refs: vec![BlockRef {
                     hash: [0xAA; 32],
@@ -60,7 +60,7 @@ mod tests {
                 mode: 0o755,
                 uid: 1000,
                 gid: 1000,
-                mtime_ns: 1700000000_000000000,
+                mtime_ns: 1_700_000_000_000_000_000,
                 size: 0,
                 block_refs: vec![],
                 xattrs: HashMap::new(),

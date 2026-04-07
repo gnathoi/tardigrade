@@ -1,16 +1,16 @@
-/// Reed-Solomon erasure coding support.
-///
-/// ECC levels:
-/// - Low:    RS(10,2) — recovers up to 2 lost shards per group (~17% overhead)
-/// - Medium: RS(10,4) — recovers up to 4 lost shards per group (~40% overhead)
-/// - High:   RS(10,6) — recovers up to 6 lost shards per group (~60% overhead)
-///
-/// This module is stubbed for the v0.1 foundation. The wire format
-/// supports ECC (ecc_shard_count field in BlockHeader), and the CLI
-/// accepts --ecc flags, but actual encoding/decoding is not yet wired
-/// into the archive pipeline.
+// Reed-Solomon erasure coding support.
+//
+// ECC levels:
+// - Low:    RS(10,2) — recovers up to 2 lost shards per group (~17% overhead)
+// - Medium: RS(10,4) — recovers up to 4 lost shards per group (~40% overhead)
+// - High:   RS(10,6) — recovers up to 6 lost shards per group (~60% overhead)
+//
+// This module is stubbed for the v0.1 foundation. The wire format
+// supports ECC (ecc_shard_count field in BlockHeader), and the CLI
+// accepts --ecc flags, but actual encoding/decoding is not yet wired
+// into the archive pipeline.
 
-/// ECC level configuration
+// ECC level configuration
 #[derive(Debug, Clone, Copy)]
 pub struct EccLevel {
     pub data_shards: usize,

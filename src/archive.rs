@@ -90,7 +90,7 @@ pub fn create_archive(
         for entry in walker {
             let entry = entry.map_err(|e| Error::IoPath {
                 path: source.to_path_buf(),
-                source: std::io::Error::new(std::io::ErrorKind::Other, e),
+                source: std::io::Error::other(e),
             })?;
             walk_entries.push((entry.path().to_path_buf(), source.to_path_buf()));
         }
@@ -214,27 +214,25 @@ pub fn create_archive(
         for chunk in pf.chunks {
             stats.block_count += 1;
 
-            if !encrypted {
-                if let Some(existing_offset) = dedup.get(&chunk.hash) {
-                    stats.dedup_savings += chunk.uncompressed_size as u64;
-                    pf.entry.block_refs.push(BlockRef {
-                        hash: chunk.hash,
-                        offset: existing_offset,
-                        slice_start: 0,
-                        slice_len: chunk.uncompressed_size,
-                        flags: 0,
-                        reserved: [0; 3],
-                    });
+            if !encrypted && let Some(existing_offset) = dedup.get(&chunk.hash) {
+                stats.dedup_savings += chunk.uncompressed_size as u64;
+                pf.entry.block_refs.push(BlockRef {
+                    hash: chunk.hash,
+                    offset: existing_offset,
+                    slice_start: 0,
+                    slice_len: chunk.uncompressed_size,
+                    flags: 0,
+                    reserved: [0; 3],
+                });
 
-                    if let Some(ref p) = progress {
-                        p.stats.blocks_deduped.fetch_add(1, Ordering::Relaxed);
-                        p.stats
-                            .dedup_savings
-                            .fetch_add(chunk.uncompressed_size as u64, Ordering::Relaxed);
-                        p.inc_compressed(chunk.uncompressed_size as u64);
-                    }
-                    continue;
+                if let Some(ref p) = progress {
+                    p.stats.blocks_deduped.fetch_add(1, Ordering::Relaxed);
+                    p.stats
+                        .dedup_savings
+                        .fetch_add(chunk.uncompressed_size as u64, Ordering::Relaxed);
+                    p.inc_compressed(chunk.uncompressed_size as u64);
                 }
+                continue;
             }
 
             let write_data = if let Some((ref key, _)) = encryption {

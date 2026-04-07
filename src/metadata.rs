@@ -116,13 +116,13 @@ pub fn validate_extraction_path(entry_path: &[u8], dest: &Path) -> Result<std::p
     // (handles edge cases with symlinks in the path)
     if let Ok(canonical_dest) = dest.canonicalize() {
         // The target may not exist yet, so canonicalize what we can
-        if let Ok(canonical_target) = target.canonicalize() {
-            if !canonical_target.starts_with(&canonical_dest) {
-                return Err(Error::PathTraversal(format!(
-                    "resolved path escapes destination: {}",
-                    path_str
-                )));
-            }
+        if let Ok(canonical_target) = target.canonicalize()
+            && !canonical_target.starts_with(&canonical_dest)
+        {
+            return Err(Error::PathTraversal(format!(
+                "resolved path escapes destination: {}",
+                path_str
+            )));
         }
     }
 

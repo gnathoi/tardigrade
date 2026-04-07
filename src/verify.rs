@@ -89,10 +89,10 @@ pub fn verify_full(archive_path: &Path) -> Result<VerifyReport> {
         for block_ref in &entry.block_refs {
             if checked_offsets.contains(&block_ref.offset) {
                 // Already checked, just note if it was corrupted
-                if corrupted_offsets.contains(&block_ref.offset) {
-                    if !report.affected_files.contains(&entry.path_display()) {
-                        report.affected_files.push(entry.path_display());
-                    }
+                if corrupted_offsets.contains(&block_ref.offset)
+                    && !report.affected_files.contains(&entry.path_display())
+                {
+                    report.affected_files.push(entry.path_display());
                 }
                 continue;
             }

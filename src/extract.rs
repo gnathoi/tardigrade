@@ -178,15 +178,14 @@ fn extract_archive_inner(
                 // Validate symlink target doesn't escape destination
                 if link_target.contains("..") {
                     let resolved = dest.join(link_target.as_ref());
-                    if let Ok(canonical_dest) = dest.canonicalize() {
-                        if let Ok(canonical_target) = resolved.canonicalize() {
-                            if !canonical_target.starts_with(&canonical_dest) {
-                                return Err(Error::SymlinkEscape {
-                                    path: target.clone(),
-                                    target: resolved,
-                                });
-                            }
-                        }
+                    if let Ok(canonical_dest) = dest.canonicalize()
+                        && let Ok(canonical_target) = resolved.canonicalize()
+                        && !canonical_target.starts_with(&canonical_dest)
+                    {
+                        return Err(Error::SymlinkEscape {
+                            path: target.clone(),
+                            target: resolved,
+                        });
                     }
                 }
 
@@ -396,8 +395,10 @@ mod tests {
         let archive_dir = TempDir::new().unwrap();
         let archive_path = archive_dir.path().join("encrypted.tg");
 
-        let mut opts = CreateOptions::default();
-        opts.passphrase = Some(b"test-passphrase-123".to_vec());
+        let opts = CreateOptions {
+            passphrase: Some(b"test-passphrase-123".to_vec()),
+            ..CreateOptions::default()
+        };
         create_archive(&archive_path, &[src.path()], &opts).unwrap();
 
         // Verify it's actually encrypted (flag set)
@@ -421,8 +422,10 @@ mod tests {
         let archive_dir = TempDir::new().unwrap();
         let archive_path = archive_dir.path().join("enc.tg");
 
-        let mut opts = CreateOptions::default();
-        opts.passphrase = Some(b"correct".to_vec());
+        let opts = CreateOptions {
+            passphrase: Some(b"correct".to_vec()),
+            ..CreateOptions::default()
+        };
         create_archive(&archive_path, &[src.path()], &opts).unwrap();
 
         let dest = TempDir::new().unwrap();
@@ -437,8 +440,10 @@ mod tests {
         let archive_dir = TempDir::new().unwrap();
         let archive_path = archive_dir.path().join("enc2.tg");
 
-        let mut opts = CreateOptions::default();
-        opts.passphrase = Some(b"pass".to_vec());
+        let opts = CreateOptions {
+            passphrase: Some(b"pass".to_vec()),
+            ..CreateOptions::default()
+        };
         create_archive(&archive_path, &[src.path()], &opts).unwrap();
 
         let dest = TempDir::new().unwrap();

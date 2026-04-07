@@ -1,3 +1,5 @@
+#![allow(dead_code)] // Many public APIs for future features (erasure, temporal, FUSE, etc.)
+
 mod archive;
 mod chunk;
 mod cli;
@@ -20,7 +22,7 @@ mod split;
 mod temporal;
 mod verify;
 
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::time::Instant;
 
 use clap::Parser;
@@ -76,7 +78,7 @@ fn main() {
 }
 
 fn cmd_create(
-    archive: &PathBuf,
+    archive: &Path,
     paths: &[PathBuf],
     codec_name: &str,
     level: i32,
@@ -118,7 +120,7 @@ fn cmd_create(
     let source_refs: Vec<&std::path::Path> = paths.iter().map(|p| p.as_path()).collect();
 
     let start = Instant::now();
-    let stats = archive::create_archive(archive.as_path(), &source_refs, &opts)?;
+    let stats = archive::create_archive(archive, &source_refs, &opts)?;
     let elapsed = start.elapsed();
 
     if !quiet {
@@ -174,14 +176,14 @@ fn cmd_create(
     Ok(())
 }
 
-fn cmd_extract(archive: &PathBuf, dest: &PathBuf, encrypt: bool, quiet: bool) -> error::Result<()> {
+fn cmd_extract(archive: &Path, dest: &Path, encrypt: bool, quiet: bool) -> error::Result<()> {
     let start = Instant::now();
     let stats = if encrypt {
         let pass = rpassword::prompt_password("Passphrase: ")
             .map_err(|e| error::Error::Io { source: e })?;
-        extract::extract_archive_encrypted(archive.as_path(), dest.as_path(), pass.as_bytes())?
+        extract::extract_archive_encrypted(archive, dest, pass.as_bytes())?
     } else {
-        extract::extract_archive(archive.as_path(), dest.as_path())?
+        extract::extract_archive(archive, dest)?
     };
     let elapsed = start.elapsed();
 
@@ -200,8 +202,8 @@ fn cmd_extract(archive: &PathBuf, dest: &PathBuf, encrypt: bool, quiet: bool) ->
     Ok(())
 }
 
-fn cmd_list(archive: &PathBuf, long: bool) -> error::Result<()> {
-    let entries = extract::list_archive(archive.as_path())?;
+fn cmd_list(archive: &Path, long: bool) -> error::Result<()> {
+    let entries = extract::list_archive(archive)?;
 
     for entry in &entries {
         if long {
@@ -235,7 +237,7 @@ fn cmd_list(archive: &PathBuf, long: bool) -> error::Result<()> {
     Ok(())
 }
 
-fn cmd_info(archive: &PathBuf) -> error::Result<()> {
+fn cmd_info(archive: &Path) -> error::Result<()> {
     let file = std::fs::File::open(archive).map_err(|e| error::Error::io_path(archive, e))?;
     let mut reader = std::io::BufReader::new(file);
 
@@ -295,9 +297,9 @@ fn cmd_info(archive: &PathBuf) -> error::Result<()> {
     Ok(())
 }
 
-fn cmd_verify(archive: &PathBuf, quiet: bool) -> error::Result<()> {
+fn cmd_verify(archive: &Path, quiet: bool) -> error::Result<()> {
     let start = Instant::now();
-    let report = verify::verify_full(archive.as_path())?;
+    let report = verify::verify_full(archive)?;
     let elapsed = start.elapsed();
 
     if !quiet {

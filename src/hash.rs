@@ -29,7 +29,7 @@ pub fn merkle_root(header_bytes: &[u8], block_hashes: &[Hash], index_hash: &Hash
     // Build tree bottom-up
     let mut current = leaves;
     while current.len() > 1 {
-        let mut next = Vec::with_capacity((current.len() + 1) / 2);
+        let mut next = Vec::with_capacity(current.len().div_ceil(2));
         for pair in current.chunks(2) {
             if pair.len() == 2 {
                 let mut hasher = blake3::Hasher::new();
