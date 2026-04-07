@@ -109,7 +109,7 @@ $ tdg verify backup.tg
 
 ## Benchmarks
 
-Benchmarks run automatically on every PR via GitHub Actions. Results below are from CI (Ubuntu, 3 runs averaged).
+Run locally with `bash bench/run-all.sh` before shipping. Results below from Apple Silicon (M-series, 10 cores, 3 runs averaged).
 
 ### Speed
 
