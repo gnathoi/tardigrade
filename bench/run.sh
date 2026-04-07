@@ -16,46 +16,75 @@ time_ms() {
     echo $((end - start))
 }
 
-# Create datasets
 create_datasets() {
     >&2 echo "Creating benchmark datasets..."
 
-    # Dataset 1: Many small files (simulates source code)
-    mkdir -p "$WORKDIR/small_files"
-    for i in $(seq 1 500); do
-        printf "// file %d\nfn main() { println!(\"hello %d\"); }\n" "$i" "$i" > "$WORKDIR/small_files/file_$i.rs"
+    # Dataset 1: Source code project (~10MB, realistic mix of sizes)
+    mkdir -p "$WORKDIR/source_project/src" "$WORKDIR/source_project/tests" "$WORKDIR/source_project/docs"
+    for i in $(seq 1 200); do
+        # Source files: 1-20KB each (realistic for code)
+        python3 -c "
+import random, string
+lines = random.randint(50, 500)
+print('\n'.join(''.join(random.choices(string.ascii_lowercase + '    \n{}();', k=random.randint(20, 120))) for _ in range(lines)))
+" > "$WORKDIR/source_project/src/module_$i.rs"
     done
-
-    # Dataset 2: Mixed binary + duplicates (simulates project with node_modules)
-    mkdir -p "$WORKDIR/mixed_dedup"
-    dd if=/dev/urandom bs=1024 count=512 of="$WORKDIR/mixed_dedup/base.bin" 2>/dev/null
-    for i in $(seq 1 30); do
-        cp "$WORKDIR/mixed_dedup/base.bin" "$WORKDIR/mixed_dedup/copy_$i.bin"
+    for i in $(seq 1 50); do
+        python3 -c "
+import random, string
+lines = random.randint(20, 200)
+print('\n'.join('fn test_' + str(j) + '() { assert!(true); }' for j in range(lines)))
+" > "$WORKDIR/source_project/tests/test_$i.rs"
     done
     for i in $(seq 1 20); do
-        dd if=/dev/urandom bs=1024 count=$((RANDOM % 256 + 64)) of="$WORKDIR/mixed_dedup/unique_$i.bin" 2>/dev/null
+        yes "Documentation content for module $i with various details about usage." | head -500 > "$WORKDIR/source_project/docs/doc_$i.md"
     done
 
-    # Dataset 3: Large compressible text
-    mkdir -p "$WORKDIR/large_text"
+    # Dataset 2: Project with heavy duplication (simulates monorepo / node_modules)
+    # Multiple packages sharing many identical or near-identical files
+    mkdir -p "$WORKDIR/dedup_heavy"
+    # Create a "base package" (~2MB)
+    mkdir -p "$WORKDIR/dedup_heavy/base"
+    for i in $(seq 1 40); do
+        dd if=/dev/urandom bs=1024 count=50 of="$WORKDIR/dedup_heavy/base/lib_$i.bin" 2>/dev/null
+    done
+    # 5 copies with slight variations (simulates 5 packages sharing deps)
+    for pkg in $(seq 1 5); do
+        cp -r "$WORKDIR/dedup_heavy/base" "$WORKDIR/dedup_heavy/pkg_$pkg"
+        # Each package has 2-3 unique files
+        for u in $(seq 1 3); do
+            dd if=/dev/urandom bs=1024 count=50 of="$WORKDIR/dedup_heavy/pkg_$pkg/unique_$u.bin" 2>/dev/null
+        done
+    done
+
+    # Dataset 3: Large mixed workload (binaries + text + duplicates)
+    mkdir -p "$WORKDIR/large_mixed"
+    # Big compressible text files
+    for i in $(seq 1 5); do
+        yes "log entry $(date) level=INFO msg=\"processing request $i\" duration=42ms" | head -200000 > "$WORKDIR/large_mixed/log_$i.txt"
+    done
+    # Medium binary files
     for i in $(seq 1 10); do
-        yes "repeated line $i for compression benchmarking purposes — tardigrade vs tar" | head -100000 > "$WORKDIR/large_text/text_$i.txt"
+        dd if=/dev/urandom bs=1024 count=1024 of="$WORKDIR/large_mixed/data_$i.bin" 2>/dev/null
+    done
+    # Some duplicates of the binary files
+    for i in $(seq 1 5); do
+        cp "$WORKDIR/large_mixed/data_$i.bin" "$WORKDIR/large_mixed/backup_$i.bin"
     done
 
-    for ds in small_files mixed_dedup large_text; do
+    for ds in source_project dedup_heavy large_mixed; do
         local size_kb=$(du -sk "$WORKDIR/$ds" | awk '{print $1}')
         local files=$(find "$WORKDIR/$ds" -type f | wc -l | tr -d ' ')
         >&2 echo "  $ds: ${files} files, ${size_kb} KB"
     done
 }
 
-# Run a single benchmark
 bench_one() {
     local dataset=$1 path=$2 runs=${3:-3}
     local input_kb=$(du -sk "$path" | awk '{print $1}')
     local input_mb=$(python3 -c "print(f'{$input_kb/1024:.2f}')")
 
-    # Warm up filesystem cache
+    # Warm filesystem cache
     find "$path" -type f -exec cat {} + > /dev/null 2>&1
 
     # --- tardigrade create ---
@@ -102,18 +131,18 @@ bench_one() {
     done
     local tar_extract=$((tar_extract_total / runs))
 
-    # Output CSV rows
     echo "tdg,$dataset,create,$tdg_create,$input_mb,$tdg_size_mb,$tdg_ratio"
     echo "tar+zstd,$dataset,create,$tar_create,$input_mb,$tar_size_mb,$tar_ratio"
     echo "tdg,$dataset,extract,$tdg_extract,$input_mb,,,"
     echo "tar+zstd,$dataset,extract,$tar_extract,$input_mb,,,"
 
-    # Human-readable
     local create_speedup=$(python3 -c "print(f'{max($tar_create,1)/max($tdg_create,1):.1f}')")
     local extract_speedup=$(python3 -c "print(f'{max($tar_extract,1)/max($tdg_extract,1):.1f}')")
+    local size_savings=$(python3 -c "print(f'{(1-$tdg_size_kb/max($tar_size_kb,1))*100:.0f}')")
     >&2 echo "  $dataset:"
-    >&2 echo "    create:  tdg ${tdg_create}ms (${tdg_size_mb}MB, ${tdg_ratio}x) vs tar+zstd ${tar_create}ms (${tar_size_mb}MB, ${tar_ratio}x) — ${create_speedup}x"
+    >&2 echo "    create:  tdg ${tdg_create}ms vs tar+zstd ${tar_create}ms — ${create_speedup}x"
     >&2 echo "    extract: tdg ${tdg_extract}ms vs tar+zstd ${tar_extract}ms — ${extract_speedup}x"
+    >&2 echo "    size:    tdg ${tdg_size_mb}MB vs tar+zstd ${tar_size_mb}MB — ${size_savings}% smaller"
 }
 
 create_datasets
@@ -123,9 +152,9 @@ create_datasets
 >&2 echo ""
 
 echo "tool,dataset,operation,time_ms,input_mb,output_mb,ratio"
-bench_one "small_files" "$WORKDIR/small_files"
-bench_one "mixed_dedup" "$WORKDIR/mixed_dedup"
-bench_one "large_text" "$WORKDIR/large_text"
+bench_one "source_project" "$WORKDIR/source_project"
+bench_one "dedup_heavy" "$WORKDIR/dedup_heavy"
+bench_one "large_mixed" "$WORKDIR/large_mixed"
 
 >&2 echo ""
 >&2 echo "Done."

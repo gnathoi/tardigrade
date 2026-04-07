@@ -121,13 +121,17 @@ Benchmarks run automatically on every PR via GitHub Actions. Results below are f
 
 ### Key Results
 
-| Dataset | tdg create | tar+zstd | Speedup | tdg size | tar+zstd size | Dedup savings |
-|---------|-----------|----------|---------|----------|---------------|---------------|
-| 500 small files (2 MB) | 23ms | 167ms | **7.3x** | 0.10 MB | 0.02 MB | — |
-| Mixed + 30 duplicates (19 MB) | 23ms | 42ms | **1.8x** | 3.96 MB | 5.09 MB | **22% smaller** |
-| Large text (73 MB) | 35ms | 43ms | **1.2x** | 0.02 MB | 0.06 MB | — |
+| Dataset | tdg create | tar+zstd | Create | tdg extract | tar extract | Extract | tdg size | tar size | Size |
+|---------|-----------|----------|--------|-------------|-------------|---------|----------|----------|------|
+| Source project (5 MB, 270 files) | 150ms | 108ms | 0.7x | 49ms | 107ms | **2.2x** | 2.54 MB | 2.52 MB | ~equal |
+| Heavy dedup (13 MB, shared deps) | 22ms | 103ms | **4.7x** | 44ms | 107ms | **2.4x** | 2.70 MB | 12.47 MB | **78% smaller** |
+| Large mixed (102 MB, logs+bins) | 50ms | 52ms | ~equal | 88ms | 98ms | 1.1x | 10.04 MB | 14.41 MB | **30% smaller** |
 
-tardigrade is faster across the board, and produces smaller archives when there's duplicate content.
+**Where tardigrade wins big:** Any workload with duplicate content. Monorepos, node_modules, docker layers, backup directories. The content-addressed dedup produces dramatically smaller archives and faster operations because less data is written.
+
+**Where it's equal:** Large unique data. Both tools hit I/O limits at the same point.
+
+**Where tar wins:** Archive creation of small unique datasets (<10MB). tar's streaming model has less overhead per file.
 
 ### Core Scaling
 

@@ -13,6 +13,9 @@ DATASET_LABELS = {
     'small_files': 'Small Files\n(500 source files)',
     'mixed_dedup': 'Mixed + Duplicates\n(binary, 30 copies)',
     'large_text': 'Large Text\n(10 files, compressible)',
+    'source_project': 'Source Project\n(270 files, mixed sizes)',
+    'dedup_heavy': 'Heavy Dedup\n(5 packages, shared deps)',
+    'large_mixed': 'Large Mixed\n(logs + binaries + copies)',
 }
 
 COLORS = {
