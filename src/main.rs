@@ -9,6 +9,7 @@ mod format;
 mod hash;
 mod index;
 mod metadata;
+mod progress;
 
 use std::path::PathBuf;
 use std::time::Instant;
@@ -65,7 +66,7 @@ fn cmd_create(
     let opts = archive::CreateOptions {
         codec,
         level,
-        respect_ignore: true,
+        show_progress: !quiet,
     };
 
     let source_refs: Vec<&std::path::Path> = paths.iter().map(|p| p.as_path()).collect();

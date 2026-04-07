@@ -1,23 +1,26 @@
 use std::fs::{self, File};
-use std::io::{BufWriter, Seek, SeekFrom, Write};
+use std::io::{BufWriter, Write};
 use std::path::Path;
+use std::sync::atomic::Ordering;
 
+use rayon::prelude::*;
 use walkdir::WalkDir;
 
-use crate::chunk::chunk_data;
+use crate::chunk::{chunk_data, Chunk};
 use crate::compress;
 use crate::dedup::DedupStore;
 use crate::error::{Error, Result};
 use crate::format::*;
-use crate::hash::{hash_block, merkle_root};
+use crate::hash::merkle_root;
 use crate::index::serialize_index;
 use crate::metadata::capture_metadata;
+use crate::progress::{CreateProgress, ProgressStats};
 
 /// Options for archive creation
 pub struct CreateOptions {
     pub codec: u8,
     pub level: i32,
-    pub respect_ignore: bool,
+    pub show_progress: bool,
 }
 
 impl Default for CreateOptions {
@@ -25,7 +28,7 @@ impl Default for CreateOptions {
         Self {
             codec: CODEC_ZSTD,
             level: 3,
-            respect_ignore: true,
+            show_progress: false,
         }
     }
 }
@@ -43,17 +46,95 @@ pub struct CreateStats {
     pub archive_size: u64,
 }
 
+/// A file that has been read and chunked, ready for dedup + write
+struct ProcessedFile {
+    entry: FileEntry,
+    chunks: Vec<CompressedChunk>,
+}
+
+struct CompressedChunk {
+    hash: Hash,
+    uncompressed_size: u32,
+    compressed_data: Vec<u8>,
+    codec: u8,
+}
+
 /// Create an archive from the given source paths.
 pub fn create_archive(
     archive_path: &Path,
     sources: &[&Path],
     opts: &CreateOptions,
 ) -> Result<CreateStats> {
+    // Phase 1: Walk and collect all file paths
+    let mut walk_entries = Vec::new();
+    for source in sources {
+        let walker = WalkDir::new(source).follow_links(false);
+        for entry in walker {
+            let entry = entry.map_err(|e| Error::IoPath {
+                path: source.to_path_buf(),
+                source: std::io::Error::new(std::io::ErrorKind::Other, e),
+            })?;
+            walk_entries.push((entry.path().to_path_buf(), source.to_path_buf()));
+        }
+    }
+
+    // Scan total size for progress bar
+    let total_bytes: u64 = walk_entries
+        .iter()
+        .filter_map(|(path, _)| fs::metadata(path).ok())
+        .filter(|m| m.is_file())
+        .map(|m| m.len())
+        .sum();
+
+    let progress = if opts.show_progress {
+        Some(CreateProgress::new(total_bytes))
+    } else {
+        None
+    };
+
+    // Phase 2: Read, chunk, and compress files in parallel
+    let codec = opts.codec;
+    let level = opts.level;
+
+    let processed: Vec<Result<ProcessedFile>> = walk_entries
+        .par_iter()
+        .map(|(path, source)| {
+            let mut file_entry = capture_metadata(path, source)?;
+
+            let chunks = match &file_entry.file_type {
+                FileType::File => {
+                    let data = fs::read(path).map_err(|e| Error::io_path(path, e))?;
+                    let raw_chunks = chunk_data(&data);
+
+                    // Compress each chunk in parallel (already within a rayon task)
+                    raw_chunks
+                        .into_iter()
+                        .map(|chunk| {
+                            let compressed = compress::compress(&chunk.data, codec, level)?;
+                            Ok(CompressedChunk {
+                                hash: chunk.hash,
+                                uncompressed_size: chunk.data.len() as u32,
+                                compressed_data: compressed,
+                                codec,
+                            })
+                        })
+                        .collect::<Result<Vec<_>>>()?
+                }
+                _ => vec![],
+            };
+
+            Ok(ProcessedFile {
+                entry: file_entry,
+                chunks,
+            })
+        })
+        .collect();
+
+    // Phase 3: Sequential write with dedup
     let file = File::create(archive_path).map_err(|e| Error::io_path(archive_path, e))?;
     let mut writer = BufWriter::new(file);
 
-    // Write archive header
-    let header = ArchiveHeader::new(0); // no flags for basic archive
+    let header = ArchiveHeader::new(0);
     let mut header_bytes = Vec::with_capacity(ARCHIVE_HEADER_SIZE);
     header.write_to(&mut header_bytes)?;
     writer.write_all(&header_bytes)?;
@@ -74,117 +155,103 @@ pub fn create_archive(
         archive_size: 0,
     };
 
-    for source in sources {
-        let walker = WalkDir::new(source).follow_links(false);
+    for result in processed {
+        let mut pf = result?;
 
-        for entry in walker {
-            let entry = entry.map_err(|e| {
-                Error::IoPath {
-                    path: source.to_path_buf(),
-                    source: std::io::Error::new(std::io::ErrorKind::Other, e),
+        match &pf.entry.file_type {
+            FileType::Directory => stats.dir_count += 1,
+            FileType::File => {
+                stats.file_count += 1;
+                stats.total_input_size += pf.entry.size;
+            }
+            FileType::Symlink(_) | FileType::Hardlink(_) => {
+                stats.file_count += 1;
+            }
+        }
+
+        for chunk in pf.chunks {
+            stats.block_count += 1;
+
+            if let Some(existing_offset) = dedup.get(&chunk.hash) {
+                // Deduplicated block
+                stats.dedup_savings += chunk.uncompressed_size as u64;
+                pf.entry.block_refs.push(BlockRef {
+                    hash: chunk.hash,
+                    offset: existing_offset,
+                    slice_start: 0,
+                    slice_len: chunk.uncompressed_size,
+                    flags: 0,
+                    reserved: [0; 3],
+                });
+
+                if let Some(ref p) = progress {
+                    p.stats.blocks_deduped.fetch_add(1, Ordering::Relaxed);
+                    p.stats
+                        .dedup_savings
+                        .fetch_add(chunk.uncompressed_size as u64, Ordering::Relaxed);
+                    p.inc_compressed(chunk.uncompressed_size as u64);
                 }
-            })?;
+            } else {
+                // New unique block
+                let block_header = BlockHeader::new(
+                    chunk.hash,
+                    chunk.compressed_data.len() as u32,
+                    chunk.uncompressed_size,
+                    chunk.codec,
+                );
 
-            let path = entry.path();
-            let mut file_entry = capture_metadata(path, source)?;
+                let block_offset = current_offset;
+                block_header.write_to(&mut writer)?;
+                writer.write_all(&chunk.compressed_data)?;
 
-            match &file_entry.file_type {
-                FileType::Directory => {
-                    stats.dir_count += 1;
-                }
-                FileType::File => {
-                    stats.file_count += 1;
-                    stats.total_input_size += file_entry.size;
+                current_offset += BLOCK_HEADER_SIZE as u64 + chunk.compressed_data.len() as u64;
+                stats.total_compressed_size += chunk.compressed_data.len() as u64;
+                stats.unique_blocks += 1;
 
-                    // Read file data
-                    let data =
-                        fs::read(path).map_err(|e| Error::io_path(path, e))?;
+                dedup.insert(chunk.hash, block_offset);
+                block_hashes.push(chunk.hash);
 
-                    // Chunk the data
-                    let chunks = chunk_data(&data);
+                pf.entry.block_refs.push(BlockRef {
+                    hash: chunk.hash,
+                    offset: block_offset,
+                    slice_start: 0,
+                    slice_len: chunk.uncompressed_size,
+                    flags: 0,
+                    reserved: [0; 3],
+                });
 
-                    for chunk in chunks {
-                        stats.block_count += 1;
-
-                        // Check dedup
-                        if let Some(existing_offset) = dedup.get(&chunk.hash) {
-                            // Duplicate block — just reference the existing one
-                            stats.dedup_savings += chunk.data.len() as u64;
-                            file_entry.block_refs.push(BlockRef {
-                                hash: chunk.hash,
-                                offset: existing_offset,
-                                slice_start: 0,
-                                slice_len: chunk.data.len() as u32,
-                                flags: 0,
-                                reserved: [0; 3],
-                            });
-                        } else {
-                            // New unique block — compress and write
-                            let compressed =
-                                compress::compress(&chunk.data, opts.codec, opts.level)?;
-
-                            let block_header = BlockHeader::new(
-                                chunk.hash,
-                                compressed.len() as u32,
-                                chunk.data.len() as u32,
-                                opts.codec,
-                            );
-
-                            // Record offset before writing
-                            let block_offset = current_offset;
-
-                            // Write block header + data
-                            block_header.write_to(&mut writer)?;
-                            writer.write_all(&compressed)?;
-
-                            current_offset +=
-                                BLOCK_HEADER_SIZE as u64 + compressed.len() as u64;
-                            stats.total_compressed_size += compressed.len() as u64;
-                            stats.unique_blocks += 1;
-
-                            // Register in dedup store
-                            dedup.insert(chunk.hash, block_offset);
-                            block_hashes.push(chunk.hash);
-
-                            file_entry.block_refs.push(BlockRef {
-                                hash: chunk.hash,
-                                offset: block_offset,
-                                slice_start: 0,
-                                slice_len: chunk.data.len() as u32,
-                                flags: 0,
-                                reserved: [0; 3],
-                            });
-                        }
-                    }
-                }
-                FileType::Symlink(_) => {
-                    stats.file_count += 1;
-                }
-                FileType::Hardlink(_) => {
-                    stats.file_count += 1;
+                if let Some(ref p) = progress {
+                    p.stats
+                        .bytes_written
+                        .fetch_add(chunk.compressed_data.len() as u64, Ordering::Relaxed);
+                    p.inc_compressed(chunk.uncompressed_size as u64);
                 }
             }
-
-            entries.push(file_entry);
         }
+
+        entries.push(pf.entry);
     }
 
-    // Serialize and write index
+    if let Some(ref p) = progress {
+        p.finish_scan();
+    }
+
+    // Write index
     let (index_data, index_hash) = serialize_index(&entries)?;
     let index_offset = current_offset;
     let index_length = index_data.len() as u64;
     writer.write_all(&index_data)?;
     current_offset += index_length;
 
-    // Write redundant index copy
+    // Write redundant index
     let redundant_index_offset = current_offset;
     writer.write_all(&index_data)?;
     current_offset += index_length;
 
-    // Compute Merkle root (includes header bytes)
+    // Merkle root
     let root_hash = merkle_root(&header_bytes, &block_hashes, &index_hash);
 
-    // Write footer
+    // Footer
     let footer = Footer::new(
         index_offset,
         index_length,
@@ -196,8 +263,11 @@ pub fn create_archive(
     current_offset += FOOTER_SIZE as u64;
 
     writer.flush()?;
-
     stats.archive_size = current_offset;
+
+    if let Some(ref p) = progress {
+        p.finish();
+    }
 
     Ok(stats)
 }
@@ -235,9 +305,7 @@ mod tests {
 
         assert!(archive_path.exists());
         assert!(stats.archive_size > 0);
-        // 3 files: hello.txt, world.txt, subdir/nested.txt
         assert!(stats.file_count >= 3);
-        // at least root + subdir
         assert!(stats.dir_count >= 2);
     }
 
@@ -257,9 +325,7 @@ mod tests {
         )
         .unwrap();
 
-        // With dedup, we should have saved space
         assert!(stats.dedup_savings > 0);
-        // Only one unique block for the identical content
         assert_eq!(stats.unique_blocks, 1);
         assert_eq!(stats.block_count, 3);
     }
@@ -279,5 +345,37 @@ mod tests {
 
         let bytes = fs::read(&archive_path).unwrap();
         assert_eq!(&bytes[..4], b"TRDG");
+    }
+
+    #[test]
+    fn parallel_archive_matches_content() {
+        let dir = TempDir::new().unwrap();
+        // Create enough data to exercise parallelism
+        for i in 0..20 {
+            fs::write(
+                dir.path().join(format!("file_{i}.txt")),
+                format!("content of file {i}").repeat(100),
+            )
+            .unwrap();
+        }
+
+        let archive_path = dir.path().join("parallel.tg");
+        let stats = create_archive(
+            &archive_path,
+            &[dir.path()],
+            &CreateOptions::default(),
+        )
+        .unwrap();
+
+        assert_eq!(stats.file_count, 20);
+
+        // Extract and verify
+        let dest = TempDir::new().unwrap();
+        crate::extract::extract_archive(&archive_path, dest.path()).unwrap();
+
+        for i in 0..20 {
+            let content = fs::read_to_string(dest.path().join(format!("file_{i}.txt"))).unwrap();
+            assert_eq!(content, format!("content of file {i}").repeat(100));
+        }
     }
 }
