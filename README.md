@@ -129,6 +129,14 @@ Benchmarks run automatically on every PR via GitHub Actions. Results below are f
 
 tardigrade is faster across the board, and produces smaller archives when there's duplicate content.
 
+### Core Scaling
+
+tardigrade uses rayon for parallel compression and hashing. More cores = more throughput, up to the I/O and serial bottleneck. Measured on Apple Silicon, extrapolated using Amdahl's law:
+
+![Core Scaling](bench/bench-scaling.svg)
+
+At 10 cores: ~2 GB/s. Predicted at 32 cores: ~2.2 GB/s. The serial fraction (~34%) is the single-threaded dedup lookup + sequential write pass.
+
 ## Archive Format (.tg)
 
 The `.tg` format is designed from scratch for modern use:
