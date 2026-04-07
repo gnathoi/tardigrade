@@ -1,15 +1,24 @@
 mod archive;
 mod chunk;
 mod cli;
+mod compat;
 mod compress;
 mod dedup;
+mod encrypt;
+mod erasure;
 mod error;
 mod extract;
 mod format;
+mod fuse_mount;
 mod hash;
+mod incremental;
 mod index;
+mod merge;
 mod metadata;
 mod progress;
+mod split;
+mod temporal;
+mod verify;
 
 use std::path::PathBuf;
 use std::time::Instant;
