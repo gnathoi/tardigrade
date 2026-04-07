@@ -12,10 +12,19 @@ use crate::dedup::DedupStore;
 use crate::encrypt::{self, KeyEncapsulation};
 use crate::error::{Error, Result};
 use crate::format::*;
-use crate::hash::merkle_root;
+use crate::hash::{hash_block, merkle_root};
 use crate::index::serialize_index;
 use crate::metadata::capture_metadata;
 use crate::progress::CreateProgress;
+
+/// Minimum chunk size — files smaller than this skip FastCDC entirely
+const MIN_CHUNK_SIZE: usize = 64 * 1024;
+
+/// Minimum size where compression is likely to help
+const MIN_COMPRESS_SIZE: usize = 64;
+
+/// BufWriter buffer size (256 KB for better sequential write performance)
+const WRITE_BUFFER_SIZE: usize = 256 * 1024;
 
 /// Options for archive creation
 pub struct CreateOptions {
@@ -51,7 +60,6 @@ pub struct CreateStats {
     pub archive_size: u64,
 }
 
-/// A file that has been read and chunked, ready for dedup + write
 struct ProcessedFile {
     entry: FileEntry,
     chunks: Vec<CompressedChunk>,
@@ -64,8 +72,63 @@ struct CompressedChunk {
     codec: u8,
 }
 
-/// Threshold below which we skip rayon (thread pool overhead not worth it)
-const PARALLEL_THRESHOLD: u64 = 10 * 1024 * 1024; // 10 MB
+/// Chunk and compress a file's data. Optimized for common cases:
+/// - Empty files: no chunks
+/// - Small files (< 64KB): single block, skip FastCDC gear hash
+/// - Tiny blocks (< 64B): store uncompressed (zstd overhead > savings)
+/// - Large files: FastCDC content-defined chunking
+fn process_file_data(data: &[u8], codec: u8, level: i32) -> Result<Vec<CompressedChunk>> {
+    if data.is_empty() {
+        return Ok(vec![]);
+    }
+
+    // Small files: skip FastCDC entirely — one block, just hash + compress
+    if data.len() < MIN_CHUNK_SIZE {
+        let hash = hash_block(data);
+        let compressed = if data.len() >= MIN_COMPRESS_SIZE {
+            let c = compress::compress(data, codec, level)?;
+            // Only use compressed if it's actually smaller
+            if c.len() < data.len() {
+                (c, codec)
+            } else {
+                (data.to_vec(), CODEC_NONE)
+            }
+        } else {
+            (data.to_vec(), CODEC_NONE) // too small to compress
+        };
+        return Ok(vec![CompressedChunk {
+            hash,
+            uncompressed_size: data.len() as u32,
+            compressed_data: compressed.0,
+            codec: compressed.1,
+        }]);
+    }
+
+    // Large files: FastCDC content-defined chunking
+    let raw_chunks = chunk_data(data);
+    raw_chunks
+        .into_iter()
+        .map(|chunk| {
+            let orig_size = chunk.data.len() as u32;
+            let (compressed_data, actual_codec) = if chunk.data.len() >= MIN_COMPRESS_SIZE {
+                let c = compress::compress(&chunk.data, codec, level)?;
+                if c.len() < chunk.data.len() {
+                    (c, codec)
+                } else {
+                    (chunk.data, CODEC_NONE)
+                }
+            } else {
+                (chunk.data, CODEC_NONE)
+            };
+            Ok(CompressedChunk {
+                hash: chunk.hash,
+                uncompressed_size: orig_size,
+                compressed_data,
+                codec: actual_codec,
+            })
+        })
+        .collect()
+}
 
 /// Create an archive from the given source paths.
 pub fn create_archive(
@@ -73,8 +136,10 @@ pub fn create_archive(
     sources: &[&Path],
     opts: &CreateOptions,
 ) -> Result<CreateStats> {
-    // Phase 1: Walk and collect all file paths
-    let mut walk_entries = Vec::new();
+    // Phase 1: Walk and collect file paths + sizes (single stat per file)
+    let mut walk_entries: Vec<(std::path::PathBuf, std::path::PathBuf, u64)> = Vec::new();
+    let mut total_bytes: u64 = 0;
+
     for source in sources {
         let walker = WalkBuilder::new(source)
             .git_ignore(opts.respect_gitignore)
@@ -92,16 +157,15 @@ pub fn create_archive(
                 path: source.to_path_buf(),
                 source: std::io::Error::other(e),
             })?;
-            walk_entries.push((entry.path().to_path_buf(), source.to_path_buf()));
+            let path = entry.path().to_path_buf();
+            // Get size during walk — avoids a second stat() later
+            let size = entry.metadata().map(|m| m.len()).unwrap_or(0);
+            if entry.file_type().is_some_and(|ft| ft.is_file()) {
+                total_bytes += size;
+            }
+            walk_entries.push((path, source.to_path_buf(), size));
         }
     }
-
-    let total_bytes: u64 = walk_entries
-        .iter()
-        .filter_map(|(path, _)| fs::metadata(path).ok())
-        .filter(|m| m.is_file())
-        .map(|m| m.len())
-        .sum();
 
     let progress = if opts.show_progress {
         Some(CreateProgress::new(total_bytes))
@@ -109,36 +173,18 @@ pub fn create_archive(
         None
     };
 
-    // Phase 2: Read, chunk, and compress files
-    // Adaptive: use rayon only when data is large enough to benefit
+    // Phase 2: Read, chunk, and compress files in parallel
     let codec = opts.codec;
     let level = opts.level;
-    let use_parallel = total_bytes >= PARALLEL_THRESHOLD;
 
     let process_one =
-        |(path, source): &(std::path::PathBuf, std::path::PathBuf)| -> Result<ProcessedFile> {
+        |(path, source, _size): &(std::path::PathBuf, std::path::PathBuf, u64)| -> Result<ProcessedFile> {
             let file_entry = capture_metadata(path, source)?;
 
             let chunks = match &file_entry.file_type {
                 FileType::File => {
                     let data = fs::read(path).map_err(|e| Error::io_path(path, e))?;
-                    if data.is_empty() {
-                        vec![]
-                    } else {
-                        let raw_chunks = chunk_data(&data);
-                        raw_chunks
-                            .into_iter()
-                            .map(|chunk| {
-                                let compressed = compress::compress(&chunk.data, codec, level)?;
-                                Ok(CompressedChunk {
-                                    hash: chunk.hash,
-                                    uncompressed_size: chunk.data.len() as u32,
-                                    compressed_data: compressed,
-                                    codec,
-                                })
-                            })
-                            .collect::<Result<Vec<_>>>()?
-                    }
+                    process_file_data(&data, codec, level)?
                 }
                 _ => vec![],
             };
@@ -149,15 +195,12 @@ pub fn create_archive(
             })
         };
 
-    let processed: Vec<Result<ProcessedFile>> = if use_parallel {
-        walk_entries.par_iter().map(process_one).collect()
-    } else {
-        walk_entries.iter().map(process_one).collect()
-    };
+    // Always use parallel — rayon handles small workloads efficiently
+    let processed: Vec<Result<ProcessedFile>> = walk_entries.par_iter().map(process_one).collect();
 
     // Phase 3: Sequential write with dedup
     let file = File::create(archive_path).map_err(|e| Error::io_path(archive_path, e))?;
-    let mut writer = BufWriter::new(file);
+    let mut writer = BufWriter::with_capacity(WRITE_BUFFER_SIZE, file);
 
     // Encryption setup
     let encryption = opts.passphrase.as_ref().map(|pass| {
@@ -183,7 +226,7 @@ pub fn create_archive(
     }
 
     let mut dedup = DedupStore::new();
-    let mut entries: Vec<FileEntry> = Vec::new();
+    let mut entries: Vec<FileEntry> = Vec::with_capacity(walk_entries.len());
     let mut block_hashes: Vec<Hash> = Vec::new();
 
     let mut stats = CreateStats {
@@ -290,17 +333,16 @@ pub fn create_archive(
     writer.write_all(&index_data)?;
     current_offset += index_length;
 
-    // Redundant index only for larger archives (saves overhead on small ones)
+    // Redundant index only for larger archives
     let redundant_index_offset = if stats.unique_blocks > 100 {
         let offset = current_offset;
         writer.write_all(&index_data)?;
         current_offset += index_length;
         offset
     } else {
-        index_offset // point to same location
+        index_offset
     };
 
-    // Merkle root
     let root_hash = merkle_root(&header_bytes, &block_hashes, &index_hash);
 
     let footer = Footer::new(
@@ -415,11 +457,45 @@ mod tests {
         let archive_path = dir.path().join("small.tg");
         create_archive(&archive_path, &[dir.path()], &CreateOptions::default()).unwrap();
 
-        // Read footer and check redundant index points to same location
         let file = std::fs::File::open(&archive_path).unwrap();
         let mut reader = std::io::BufReader::new(file);
         let _header = ArchiveHeader::read_from(&mut reader).unwrap();
         let footer = crate::extract::read_footer(&mut reader).unwrap();
         assert_eq!(footer.index_offset, footer.redundant_index_offset);
+    }
+
+    #[test]
+    fn small_files_skip_fastcdc() {
+        // Files under 64KB should produce exactly one chunk each
+        let dir = TempDir::new().unwrap();
+        fs::write(dir.path().join("tiny.txt"), "hello").unwrap();
+        fs::write(dir.path().join("medium.txt"), "x".repeat(1000)).unwrap();
+
+        let archive_path = dir.path().join("small.tg");
+        let stats =
+            create_archive(&archive_path, &[dir.path()], &CreateOptions::default()).unwrap();
+
+        // Each small file = exactly 1 block
+        assert_eq!(stats.block_count, stats.file_count);
+    }
+
+    #[test]
+    fn incompressible_data_stored_raw() {
+        // Random data shouldn't be compressed (would make it bigger)
+        let dir = TempDir::new().unwrap();
+        let mut data = vec![0u8; 10_000];
+        for (i, b) in data.iter_mut().enumerate() {
+            *b = (i * 31 + 17) as u8; // pseudo-random but deterministic
+        }
+        fs::write(dir.path().join("random.bin"), &data).unwrap();
+
+        let archive_path = dir.path().join("raw.tg");
+        create_archive(&archive_path, &[dir.path()], &CreateOptions::default()).unwrap();
+
+        // Should still round-trip
+        let dest = TempDir::new().unwrap();
+        crate::extract::extract_archive(&archive_path, dest.path()).unwrap();
+        let extracted = fs::read(dest.path().join("random.bin")).unwrap();
+        assert_eq!(extracted, data);
     }
 }
