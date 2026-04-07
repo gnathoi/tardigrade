@@ -39,7 +39,7 @@ impl Default for CreateOptions {
     fn default() -> Self {
         Self {
             codec: CODEC_ZSTD,
-            level: 3,
+            level: 9,
             show_progress: false,
             respect_gitignore: true,
             passphrase: None,

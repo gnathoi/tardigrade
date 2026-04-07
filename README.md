@@ -77,11 +77,14 @@ tdg verify backup.tg
 tdg create --encrypt secret.tg ./private-data
 tdg extract --encrypt secret.tg -o ./decrypted
 
-# Use lz4 for maximum speed
+# Fast mode (lz4, lower compression, maximum speed)
 tdg create --compress lz4 fast.tg ./data
 
-# High compression
+# Maximum compression
 tdg create --level 19 small.tg ./data
+
+# Faster compression (default is 9)
+tdg create --level 1 quick.tg ./data
 
 # Disable .gitignore filtering
 tdg create --no-ignore everything.tg ./repo
@@ -92,20 +95,31 @@ tdg create --no-ignore everything.tg ./repo
 ```
 $ tdg create backup.tg ./my-project
 
-✓ Created backup.tg (4.29 MiB <- 19.31 MiB, 4.5x ratio, 0.02s, 827 MB/s)
-  63 files, 2 dirs, 64 blocks (31 unique)
-  ↗ 1.52 MiB saved by dedup
-  Compression: 4.5x  Codec: zstd
+  created backup.tg
+
+  21.71 MiB -> 7.66 MiB  2.8x  zstd
+  125 files, 11 dirs  127 blocks (123 unique)
+  1.95 MiB saved by dedup (4 duplicate blocks eliminated)
+  0.03s  806 MB/s
 ```
 
 ```
 $ tdg verify backup.tg
 
-✓ Verify: backup.tg
-  Header: OK  Footer: OK  Index: OK
-  Blocks: 31/31 OK, 0 corrupted (0.0s)
+  verified backup.tg
 
-  ✓ Archive integrity verified
+  header ok  footer ok  index ok
+  blocks 123/123 ok, 0 corrupted
+  0.02s
+```
+
+```
+$ tdg extract backup.tg -o ./restored
+
+  extracted backup.tg -> ./restored
+
+  21.71 MiB  125 files, 11 dirs
+  0.02s
 ```
 
 ## Benchmarks

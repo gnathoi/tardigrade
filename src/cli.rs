@@ -42,8 +42,8 @@ pub enum Command {
         #[arg(long, default_value = "zstd")]
         compress: String,
 
-        /// Compression level (1-19 for zstd)
-        #[arg(long, short, default_value = "3")]
+        /// Compression level (1-19 for zstd, default 9)
+        #[arg(long, short, default_value = "9")]
         level: i32,
 
         /// Don't respect .gitignore files
