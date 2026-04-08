@@ -4,6 +4,7 @@ mod cli;
 mod compat;
 mod compress;
 mod dedup;
+mod diff;
 mod encrypt;
 mod erasure;
 mod error;
@@ -102,6 +103,7 @@ fn main() {
         Command::Merge { a, b, output } => cmd_merge(&a, &b, &output, cli.quiet),
         Command::Split { archive, size } => cmd_split(&archive, &size, cli.quiet),
         Command::Join { volumes, output } => cmd_join(&volumes, &output, cli.quiet),
+        Command::Diff { archive, from, to } => cmd_diff(&archive, from, to, cli.quiet),
         Command::Update { check } => cmd_update(check, cli.quiet),
         Command::Convert {
             input,
@@ -960,6 +962,85 @@ fn cmd_join(volumes: &[PathBuf], output: &Path, quiet: bool) -> error::Result<()
         println!(
             "  {}",
             style(format!("{:.2}s", elapsed.as_secs_f64())).dim()
+        );
+    }
+
+    Ok(())
+}
+
+fn cmd_diff(archive: &Path, from: u64, to: u64, quiet: bool) -> error::Result<()> {
+    let result = diff::diff_generations(archive, from, to)?;
+
+    if !quiet {
+        println!();
+        println!(
+            "  {} {}  {} {} {}",
+            style("diff").green().bold(),
+            style(archive.display()).white().bold(),
+            style(format!("@{from}")).cyan(),
+            style("→").dim(),
+            style(format!("@{to}")).cyan(),
+        );
+        println!();
+
+        if result.entries.is_empty() {
+            println!("  {}", style("no changes").dim());
+        } else {
+            for entry in &result.entries {
+                match entry {
+                    diff::DiffEntry::Added(f) => {
+                        println!(
+                            "  {} {}  {}",
+                            style("+").green().bold(),
+                            style(f.path_display()).green(),
+                            style(format_size(f.size, BINARY)).dim(),
+                        );
+                    }
+                    diff::DiffEntry::Removed(f) => {
+                        println!(
+                            "  {} {}  {}",
+                            style("-").red().bold(),
+                            style(f.path_display()).red(),
+                            style(format_size(f.size, BINARY)).dim(),
+                        );
+                    }
+                    diff::DiffEntry::Modified { old, new } => {
+                        println!(
+                            "  {} {}  {} {} {}",
+                            style("~").yellow().bold(),
+                            style(new.path_display()).yellow(),
+                            style(format_size(old.size, BINARY)).dim(),
+                            style("→").dim(),
+                            style(format_size(new.size, BINARY)).dim(),
+                        );
+                    }
+                }
+            }
+        }
+
+        let added = result
+            .entries
+            .iter()
+            .filter(|e| matches!(e, diff::DiffEntry::Added(_)))
+            .count();
+        let removed = result
+            .entries
+            .iter()
+            .filter(|e| matches!(e, diff::DiffEntry::Removed(_)))
+            .count();
+        let modified = result
+            .entries
+            .iter()
+            .filter(|e| matches!(e, diff::DiffEntry::Modified { .. }))
+            .count();
+
+        println!();
+        println!(
+            "  {} added, {} modified, {} removed ({} unchanged)",
+            style(added).green(),
+            style(modified).yellow(),
+            style(removed).red(),
+            result.unchanged_count,
         );
     }
 
