@@ -780,6 +780,286 @@ fn cli_ecc_flag() {
     );
 }
 
+// ─── ECC: create + extract + verify + info + repair ───────────────────────
+
+#[test]
+fn cli_ecc_create_extract_verify() {
+    let tmp = TempDir::new().unwrap();
+    let src = tmp.path().join("src");
+    fs::create_dir_all(&src).unwrap();
+
+    // Need enough files to form at least one full ECC group (10 data shards)
+    for i in 0..15 {
+        fs::write(
+            src.join(format!("file_{i}.txt")),
+            format!("ECC test content {i}").repeat(500),
+        )
+        .unwrap();
+    }
+
+    let archive = tmp.path().join("ecc_full.tg");
+
+    // Create with ECC
+    let output = tdg()
+        .args([
+            "create",
+            "--ecc",
+            "low",
+            archive.to_str().unwrap(),
+            src.to_str().unwrap(),
+        ])
+        .output()
+        .unwrap();
+    assert!(
+        output.status.success(),
+        "ecc create failed: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    assert!(
+        stdout.contains("ecc:") && stdout.contains("parity"),
+        "expected ECC info in output: {stdout}"
+    );
+
+    // Info should show erasure-coded flag
+    let output = tdg()
+        .args(["info", archive.to_str().unwrap()])
+        .output()
+        .unwrap();
+    assert!(output.status.success());
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    assert!(
+        stdout.contains("erasure-coded"),
+        "info should show erasure-coded flag: {stdout}"
+    );
+    assert!(
+        stdout.contains("ECC:"),
+        "info should show ECC details: {stdout}"
+    );
+
+    // Verify should pass
+    let output = tdg()
+        .args(["verify", archive.to_str().unwrap()])
+        .output()
+        .unwrap();
+    assert!(output.status.success());
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    assert!(stdout.contains("verified"));
+    assert!(
+        stdout.contains("ecc:"),
+        "verify should show ECC info: {stdout}"
+    );
+
+    // Extract should succeed
+    let dest = tmp.path().join("extracted");
+    let output = tdg()
+        .args([
+            "extract",
+            archive.to_str().unwrap(),
+            "-o",
+            dest.to_str().unwrap(),
+        ])
+        .output()
+        .unwrap();
+    assert!(
+        output.status.success(),
+        "ecc extract failed: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    for i in 0..15 {
+        let content = fs::read_to_string(dest.join(format!("file_{i}.txt"))).unwrap();
+        assert_eq!(content, format!("ECC test content {i}").repeat(500));
+    }
+}
+
+#[test]
+fn cli_ecc_repair_corrupted_block() {
+    let tmp = TempDir::new().unwrap();
+    let src = tmp.path().join("src");
+    fs::create_dir_all(&src).unwrap();
+
+    // Create enough unique files for a full ECC group
+    for i in 0..12 {
+        fs::write(
+            src.join(format!("file_{i}.txt")),
+            format!("repair test unique content for file number {i}").repeat(500),
+        )
+        .unwrap();
+    }
+
+    let archive = tmp.path().join("repair.tg");
+
+    // Create with ECC low (2 parity shards)
+    let output = tdg()
+        .args([
+            "create",
+            "--ecc",
+            "low",
+            archive.to_str().unwrap(),
+            src.to_str().unwrap(),
+            "-q",
+        ])
+        .output()
+        .unwrap();
+    assert!(output.status.success());
+
+    // Corrupt a data block — find the first block after the header (offset 16)
+    // Read the archive, find a block, and flip some bytes in its compressed data
+    let mut data = fs::read(&archive).unwrap();
+    // The first block starts at offset 16 (ARCHIVE_HEADER_SIZE)
+    // Block header is 48 bytes, data follows immediately
+    let data_start = 16 + 48; // header + first block header
+    if data_start + 10 < data.len() {
+        // Corrupt a few bytes of the compressed data
+        for i in 0..10 {
+            data[data_start + i] ^= 0xFF;
+        }
+    }
+    fs::write(&archive, &data).unwrap();
+
+    // Verify should detect corruption
+    let output = tdg()
+        .args(["verify", archive.to_str().unwrap()])
+        .output()
+        .unwrap();
+    assert!(!output.status.success(), "verify should fail on corrupted archive");
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    assert!(
+        stdout.contains("corrupted") || stdout.contains("CORRUPTED"),
+        "verify should report corruption: {stdout}"
+    );
+
+    // Repair should fix it
+    let output = tdg()
+        .args(["repair", archive.to_str().unwrap()])
+        .output()
+        .unwrap();
+    assert!(
+        output.status.success(),
+        "repair failed: {}{}",
+        String::from_utf8_lossy(&output.stdout),
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    assert!(
+        stdout.contains("repaired") || stdout.contains("recovered"),
+        "repair should report recovery: {stdout}"
+    );
+
+    // Verify should now pass
+    let output = tdg()
+        .args(["verify", archive.to_str().unwrap()])
+        .output()
+        .unwrap();
+    assert!(
+        output.status.success(),
+        "verify should pass after repair: {}",
+        String::from_utf8_lossy(&output.stdout)
+    );
+
+    // Extract should work
+    let dest = tmp.path().join("extracted");
+    let output = tdg()
+        .args([
+            "extract",
+            archive.to_str().unwrap(),
+            "-o",
+            dest.to_str().unwrap(),
+        ])
+        .output()
+        .unwrap();
+    assert!(
+        output.status.success(),
+        "extract after repair failed: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+}
+
+#[test]
+fn cli_ecc_medium_and_high_levels() {
+    for level in &["medium", "high"] {
+        let tmp = TempDir::new().unwrap();
+        let src = tmp.path().join("src");
+        fs::create_dir_all(&src).unwrap();
+        for i in 0..5 {
+            fs::write(
+                src.join(format!("f{i}.txt")),
+                format!("content for {level} level test {i}").repeat(200),
+            )
+            .unwrap();
+        }
+
+        let archive = tmp.path().join(format!("ecc_{level}.tg"));
+        let output = tdg()
+            .args([
+                "create",
+                "--ecc",
+                level,
+                archive.to_str().unwrap(),
+                src.to_str().unwrap(),
+                "-q",
+            ])
+            .output()
+            .unwrap();
+        assert!(
+            output.status.success(),
+            "create --ecc {level} failed: {}",
+            String::from_utf8_lossy(&output.stderr)
+        );
+
+        // Extract
+        let dest = tmp.path().join("out");
+        let output = tdg()
+            .args([
+                "extract",
+                archive.to_str().unwrap(),
+                "-o",
+                dest.to_str().unwrap(),
+            ])
+            .output()
+            .unwrap();
+        assert!(output.status.success());
+        for i in 0..5 {
+            let content = fs::read_to_string(dest.join(format!("f{i}.txt"))).unwrap();
+            assert_eq!(
+                content,
+                format!("content for {level} level test {i}").repeat(200)
+            );
+        }
+    }
+}
+
+#[test]
+fn cli_repair_no_ecc() {
+    // Repair on a non-ECC archive should report no damage
+    let tmp = TempDir::new().unwrap();
+    let src = tmp.path().join("src");
+    fs::create_dir_all(&src).unwrap();
+    fs::write(src.join("a.txt"), "no ecc data").unwrap();
+
+    let archive = tmp.path().join("noecc.tg");
+    tdg()
+        .args([
+            "create",
+            archive.to_str().unwrap(),
+            src.to_str().unwrap(),
+            "-q",
+        ])
+        .output()
+        .unwrap();
+
+    let output = tdg()
+        .args(["repair", archive.to_str().unwrap()])
+        .output()
+        .unwrap();
+    assert!(output.status.success());
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    assert!(
+        stdout.contains("no damage"),
+        "repair on clean archive should report no damage: {stdout}"
+    );
+}
+
 // ─── Quiet mode ────────────────────────────────────────────────────────────
 
 #[test]
