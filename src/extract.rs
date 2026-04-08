@@ -1,0 +1,511 @@
+use std::collections::HashMap;
+use std::fs::{self, File};
+use std::io::{BufReader, Read, Seek, SeekFrom};
+use std::path::Path;
+
+use crate::compress;
+use crate::encrypt::{self, KeyEncapsulation, SymmetricKey};
+use crate::error::{Error, Result};
+use crate::format::*;
+use crate::index::deserialize_index;
+use crate::metadata::{restore_metadata, validate_extraction_path};
+
+use std::sync::Arc;
+
+/// Get a block from cache or read it. Returns Arc to avoid cloning.
+fn get_block(
+    reader: &mut (impl Read + Seek),
+    cache: &mut HashMap<u64, Arc<Vec<u8>>>,
+    offset: u64,
+    key: Option<&SymmetricKey>,
+) -> Result<Arc<Vec<u8>>> {
+    if let Some(cached) = cache.get(&offset) {
+        return Ok(Arc::clone(cached));
+    }
+    let (_, data) = read_block(reader, offset, key)?;
+    let arc = Arc::new(data);
+    cache.insert(offset, Arc::clone(&arc));
+    Ok(arc)
+}
+
+/// Read the footer from the end of an archive file.
+pub fn read_footer(reader: &mut (impl Read + Seek)) -> Result<Footer> {
+    reader.seek(SeekFrom::End(-(FOOTER_SIZE as i64)))?;
+    Footer::read_from(reader)
+}
+
+/// Read and deserialize the index from an archive.
+pub fn read_index(reader: &mut (impl Read + Seek), footer: &Footer) -> Result<Vec<FileEntry>> {
+    reader.seek(SeekFrom::Start(footer.index_offset))?;
+    let mut index_data = vec![0u8; footer.index_length as usize];
+    reader.read_exact(&mut index_data)?;
+
+    // Try primary index
+    match deserialize_index(&index_data, footer.index_length as usize * 10) {
+        Ok(entries) => Ok(entries),
+        Err(_) => {
+            // Fall back to redundant index
+            reader.seek(SeekFrom::Start(footer.redundant_index_offset))?;
+            let mut redundant_data = vec![0u8; footer.index_length as usize];
+            reader.read_exact(&mut redundant_data)?;
+            deserialize_index(&redundant_data, footer.index_length as usize * 10)
+        }
+    }
+}
+
+/// Read and decompress a single block from the archive.
+/// If `key` is Some, decrypts before decompressing.
+fn read_block(
+    reader: &mut (impl Read + Seek),
+    offset: u64,
+    key: Option<&SymmetricKey>,
+) -> Result<(BlockHeader, Vec<u8>)> {
+    reader.seek(SeekFrom::Start(offset))?;
+    let header = BlockHeader::read_from(reader)?;
+
+    let mut raw = vec![0u8; header.compressed_size as usize];
+    reader.read_exact(&mut raw)?;
+
+    // Decrypt if encrypted
+    let compressed = if let Some(k) = key {
+        encrypt::decrypt_block(&raw, k, &header.hash)?
+    } else {
+        raw
+    };
+
+    let data = compress::decompress(&compressed, header.codec, header.uncompressed_size as usize)?;
+
+    // Verify hash
+    let actual_hash: Hash = blake3::hash(&data).into();
+    if actual_hash != header.hash {
+        return Err(Error::ChecksumMismatch {
+            offset,
+            expected: hex::encode(header.hash),
+            actual: hex::encode(actual_hash),
+        });
+    }
+
+    Ok((header, data))
+}
+
+/// Extract an archive to a destination directory.
+pub fn extract_archive(archive_path: &Path, dest: &Path) -> Result<ExtractStats> {
+    extract_archive_inner(archive_path, dest, None)
+}
+
+/// Extract an encrypted archive with a passphrase.
+pub fn extract_archive_encrypted(
+    archive_path: &Path,
+    dest: &Path,
+    passphrase: &[u8],
+) -> Result<ExtractStats> {
+    extract_archive_inner(archive_path, dest, Some(passphrase))
+}
+
+fn extract_archive_inner(
+    archive_path: &Path,
+    dest: &Path,
+    passphrase: Option<&[u8]>,
+) -> Result<ExtractStats> {
+    let file = File::open(archive_path).map_err(|e| Error::io_path(archive_path, e))?;
+    let mut reader = BufReader::new(file);
+
+    // Read and validate header
+    let header = ArchiveHeader::read_from(&mut reader)?;
+
+    // Handle encryption
+    let key: Option<SymmetricKey> = if header.is_encrypted() {
+        let pass = passphrase.ok_or(Error::EncryptedArchive)?;
+        let encap = KeyEncapsulation::read_from(&mut reader)?;
+        Some(encap.unwrap_with_passphrase(pass)?)
+    } else {
+        None
+    };
+
+    // Read footer and index
+    let footer = read_footer(&mut reader)?;
+    let entries = read_index(&mut reader, &footer)?;
+
+    // Create destination
+    fs::create_dir_all(dest).map_err(|e| Error::io_path(dest, e))?;
+
+    let mut stats = ExtractStats {
+        file_count: 0,
+        dir_count: 0,
+        total_size: 0,
+        errors: 0,
+    };
+
+    // Cache for decompressed blocks — uses Arc to avoid cloning large buffers
+    let mut block_cache: HashMap<u64, std::sync::Arc<Vec<u8>>> = HashMap::new();
+
+    // First pass: create all directories
+    for entry in &entries {
+        if entry.file_type == FileType::Directory {
+            let target = validate_extraction_path(&entry.path, dest)?;
+            fs::create_dir_all(&target).map_err(|e| Error::io_path(&target, e))?;
+            stats.dir_count += 1;
+        }
+    }
+
+    // Second pass: extract files
+    for entry in &entries {
+        match &entry.file_type {
+            FileType::File => {
+                let target = validate_extraction_path(&entry.path, dest)?;
+
+                if let Some(parent) = target.parent() {
+                    fs::create_dir_all(parent).map_err(|e| Error::io_path(parent, e))?;
+                }
+
+                // Fast path: single-block file (very common for source code)
+                if entry.block_refs.len() == 1 {
+                    let block_ref = &entry.block_refs[0];
+                    let block_data = get_block(
+                        &mut reader,
+                        &mut block_cache,
+                        block_ref.offset,
+                        key.as_ref(),
+                    )?;
+
+                    let start = block_ref.slice_start as usize;
+                    let end = start + block_ref.slice_len as usize;
+                    if end > block_data.len() {
+                        return Err(Error::InvalidArchive(format!(
+                            "block ref out of bounds: {}..{} > {}",
+                            start,
+                            end,
+                            block_data.len()
+                        )));
+                    }
+
+                    fs::write(&target, &block_data[start..end])
+                        .map_err(|e| Error::io_path(&target, e))?;
+                } else {
+                    // Multi-block file: reassemble
+                    let mut file_data = Vec::with_capacity(entry.size as usize);
+                    for block_ref in &entry.block_refs {
+                        let block_data = get_block(
+                            &mut reader,
+                            &mut block_cache,
+                            block_ref.offset,
+                            key.as_ref(),
+                        )?;
+
+                        let start = block_ref.slice_start as usize;
+                        let end = start + block_ref.slice_len as usize;
+                        if end > block_data.len() {
+                            return Err(Error::InvalidArchive(format!(
+                                "block ref out of bounds: {}..{} > {}",
+                                start,
+                                end,
+                                block_data.len()
+                            )));
+                        }
+                        file_data.extend_from_slice(&block_data[start..end]);
+                    }
+
+                    fs::write(&target, &file_data).map_err(|e| Error::io_path(&target, e))?;
+                }
+                restore_metadata(&target, entry)?;
+
+                stats.file_count += 1;
+                stats.total_size += entry.size;
+            }
+            FileType::Symlink(target_bytes) => {
+                let target = validate_extraction_path(&entry.path, dest)?;
+                let link_target = String::from_utf8_lossy(target_bytes);
+
+                // Validate symlink target doesn't escape destination
+                if link_target.contains("..") {
+                    let resolved = dest.join(link_target.as_ref());
+                    if let Ok(canonical_dest) = dest.canonicalize()
+                        && let Ok(canonical_target) = resolved.canonicalize()
+                        && !canonical_target.starts_with(&canonical_dest)
+                    {
+                        return Err(Error::SymlinkEscape {
+                            path: target.clone(),
+                            target: resolved,
+                        });
+                    }
+                }
+
+                #[cfg(unix)]
+                {
+                    if target.exists() || target.symlink_metadata().is_ok() {
+                        fs::remove_file(&target).ok();
+                    }
+                    std::os::unix::fs::symlink(link_target.as_ref(), &target)
+                        .map_err(|e| Error::io_path(&target, e))?;
+                }
+
+                stats.file_count += 1;
+            }
+            FileType::Directory => {} // Already handled
+            FileType::Hardlink(target_bytes) => {
+                let target = validate_extraction_path(&entry.path, dest)?;
+                let link_target_str = String::from_utf8_lossy(target_bytes);
+                let link_target = dest.join(link_target_str.as_ref());
+
+                if link_target.exists() {
+                    fs::hard_link(&link_target, &target).map_err(|e| Error::io_path(&target, e))?;
+                }
+
+                stats.file_count += 1;
+            }
+        }
+    }
+
+    // Third pass: restore directory metadata (after all files are written)
+    for entry in &entries {
+        if entry.file_type == FileType::Directory {
+            let target = validate_extraction_path(&entry.path, dest)?;
+            if target.exists() {
+                restore_metadata(&target, entry).ok(); // best effort for dirs
+            }
+        }
+    }
+
+    Ok(stats)
+}
+
+/// List entries in an archive (just paths and metadata, no extraction).
+pub fn list_archive(archive_path: &Path) -> Result<Vec<FileEntry>> {
+    let file = File::open(archive_path).map_err(|e| Error::io_path(archive_path, e))?;
+    let mut reader = BufReader::new(file);
+
+    let _header = ArchiveHeader::read_from(&mut reader)?;
+    let footer = read_footer(&mut reader)?;
+    read_index(&mut reader, &footer)
+}
+
+/// Verify archive integrity (check all block checksums).
+pub fn verify_archive(archive_path: &Path) -> Result<VerifyResult> {
+    let file = File::open(archive_path).map_err(|e| Error::io_path(archive_path, e))?;
+    let mut reader = BufReader::new(file);
+
+    let _header = ArchiveHeader::read_from(&mut reader)?;
+    let footer = read_footer(&mut reader)?;
+    let entries = read_index(&mut reader, &footer)?;
+
+    let mut result = VerifyResult {
+        blocks_checked: 0,
+        blocks_ok: 0,
+        blocks_corrupted: 0,
+        corrupted_files: vec![],
+    };
+
+    // Collect all unique block offsets
+    let mut checked_offsets = std::collections::HashSet::new();
+
+    for entry in &entries {
+        let mut file_ok = true;
+        for block_ref in &entry.block_refs {
+            if checked_offsets.contains(&block_ref.offset) {
+                continue;
+            }
+            checked_offsets.insert(block_ref.offset);
+            result.blocks_checked += 1;
+
+            match read_block(&mut reader, block_ref.offset, None) {
+                Ok(_) => result.blocks_ok += 1,
+                Err(_) => {
+                    result.blocks_corrupted += 1;
+                    file_ok = false;
+                }
+            }
+        }
+        if !file_ok {
+            result
+                .corrupted_files
+                .push(String::from_utf8_lossy(&entry.path).into_owned());
+        }
+    }
+
+    Ok(result)
+}
+
+#[derive(Debug)]
+pub struct ExtractStats {
+    pub file_count: u64,
+    pub dir_count: u64,
+    pub total_size: u64,
+    pub errors: u64,
+}
+
+#[derive(Debug)]
+pub struct VerifyResult {
+    pub blocks_checked: u64,
+    pub blocks_ok: u64,
+    pub blocks_corrupted: u64,
+    pub corrupted_files: Vec<String>,
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::archive::{CreateOptions, create_archive};
+    use tempfile::TempDir;
+
+    #[test]
+    fn create_extract_round_trip() {
+        let src = TempDir::new().unwrap();
+        fs::write(src.path().join("hello.txt"), "Hello, tardigrade!").unwrap();
+        fs::create_dir(src.path().join("subdir")).unwrap();
+        fs::write(src.path().join("subdir/nested.txt"), "Nested content.").unwrap();
+
+        let archive_dir = TempDir::new().unwrap();
+        let archive_path = archive_dir.path().join("test.tg");
+
+        create_archive(&archive_path, &[src.path()], &CreateOptions::default()).unwrap();
+
+        let dest = TempDir::new().unwrap();
+        let stats = extract_archive(&archive_path, dest.path()).unwrap();
+
+        assert_eq!(stats.file_count, 2);
+
+        // Verify file contents
+        let hello = fs::read_to_string(dest.path().join("hello.txt")).unwrap();
+        assert_eq!(hello, "Hello, tardigrade!");
+
+        let nested = fs::read_to_string(dest.path().join("subdir/nested.txt")).unwrap();
+        assert_eq!(nested, "Nested content.");
+    }
+
+    #[test]
+    fn create_extract_dedup_round_trip() {
+        let src = TempDir::new().unwrap();
+        let data = "deduplicated content".repeat(5000);
+        fs::write(src.path().join("a.txt"), &data).unwrap();
+        fs::write(src.path().join("b.txt"), &data).unwrap();
+
+        let archive_dir = TempDir::new().unwrap();
+        let archive_path = archive_dir.path().join("dedup.tg");
+
+        let create_stats =
+            create_archive(&archive_path, &[src.path()], &CreateOptions::default()).unwrap();
+
+        assert!(create_stats.dedup_savings > 0);
+
+        let dest = TempDir::new().unwrap();
+        extract_archive(&archive_path, dest.path()).unwrap();
+
+        let a = fs::read_to_string(dest.path().join("a.txt")).unwrap();
+        let b = fs::read_to_string(dest.path().join("b.txt")).unwrap();
+        assert_eq!(a, data);
+        assert_eq!(b, data);
+    }
+
+    #[test]
+    fn list_archive_returns_entries() {
+        let src = TempDir::new().unwrap();
+        fs::write(src.path().join("file.txt"), "content").unwrap();
+
+        let archive_dir = TempDir::new().unwrap();
+        let archive_path = archive_dir.path().join("list.tg");
+
+        create_archive(&archive_path, &[src.path()], &CreateOptions::default()).unwrap();
+
+        let entries = list_archive(&archive_path).unwrap();
+        assert!(!entries.is_empty());
+        let paths: Vec<String> = entries.iter().map(|e| e.path_display()).collect();
+        assert!(paths.iter().any(|p| p.contains("file.txt")));
+    }
+
+    #[test]
+    fn verify_clean_archive() {
+        let src = TempDir::new().unwrap();
+        fs::write(src.path().join("data.txt"), "some data to verify").unwrap();
+
+        let archive_dir = TempDir::new().unwrap();
+        let archive_path = archive_dir.path().join("verify.tg");
+
+        create_archive(&archive_path, &[src.path()], &CreateOptions::default()).unwrap();
+
+        let result = verify_archive(&archive_path).unwrap();
+        assert!(result.blocks_corrupted == 0);
+        assert!(result.blocks_ok > 0);
+    }
+
+    #[test]
+    fn encrypted_round_trip() {
+        let src = TempDir::new().unwrap();
+        let data = "secret data that must survive encryption round-trip".repeat(100);
+        fs::write(src.path().join("secret.txt"), &data).unwrap();
+
+        let archive_dir = TempDir::new().unwrap();
+        let archive_path = archive_dir.path().join("encrypted.tg");
+
+        let opts = CreateOptions {
+            passphrase: Some(b"test-passphrase-123".to_vec()),
+            ..CreateOptions::default()
+        };
+        create_archive(&archive_path, &[src.path()], &opts).unwrap();
+
+        // Verify it's actually encrypted (flag set)
+        let file = std::fs::File::open(&archive_path).unwrap();
+        let mut reader = std::io::BufReader::new(file);
+        let header = crate::format::ArchiveHeader::read_from(&mut reader).unwrap();
+        assert!(header.is_encrypted());
+
+        // Extract with correct passphrase
+        let dest = TempDir::new().unwrap();
+        extract_archive_encrypted(&archive_path, dest.path(), b"test-passphrase-123").unwrap();
+        let content = fs::read_to_string(dest.path().join("secret.txt")).unwrap();
+        assert_eq!(content, data);
+    }
+
+    #[test]
+    fn encrypted_wrong_passphrase_fails() {
+        let src = TempDir::new().unwrap();
+        fs::write(src.path().join("data.txt"), "content").unwrap();
+
+        let archive_dir = TempDir::new().unwrap();
+        let archive_path = archive_dir.path().join("enc.tg");
+
+        let opts = CreateOptions {
+            passphrase: Some(b"correct".to_vec()),
+            ..CreateOptions::default()
+        };
+        create_archive(&archive_path, &[src.path()], &opts).unwrap();
+
+        let dest = TempDir::new().unwrap();
+        assert!(extract_archive_encrypted(&archive_path, dest.path(), b"wrong").is_err());
+    }
+
+    #[test]
+    fn encrypted_without_passphrase_fails() {
+        let src = TempDir::new().unwrap();
+        fs::write(src.path().join("data.txt"), "content").unwrap();
+
+        let archive_dir = TempDir::new().unwrap();
+        let archive_path = archive_dir.path().join("enc2.tg");
+
+        let opts = CreateOptions {
+            passphrase: Some(b"pass".to_vec()),
+            ..CreateOptions::default()
+        };
+        create_archive(&archive_path, &[src.path()], &opts).unwrap();
+
+        let dest = TempDir::new().unwrap();
+        assert!(extract_archive(&archive_path, dest.path()).is_err());
+    }
+
+    #[test]
+    fn empty_directory_archive() {
+        let src = TempDir::new().unwrap();
+        // Just the empty temp dir itself
+
+        let archive_dir = TempDir::new().unwrap();
+        let archive_path = archive_dir.path().join("empty.tg");
+
+        let stats =
+            create_archive(&archive_path, &[src.path()], &CreateOptions::default()).unwrap();
+
+        assert_eq!(stats.file_count, 0);
+        assert_eq!(stats.dir_count, 1);
+
+        let dest = TempDir::new().unwrap();
+        extract_archive(&archive_path, dest.path()).unwrap();
+    }
+}

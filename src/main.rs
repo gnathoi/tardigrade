@@ -1,3 +1,419 @@
+#![allow(dead_code)] // Many public APIs for future features (erasure, temporal, FUSE, etc.)
+
+mod archive;
+mod chunk;
+mod cli;
+mod compat;
+mod compress;
+mod dedup;
+mod encrypt;
+mod erasure;
+mod error;
+mod extract;
+mod format;
+mod fuse_mount;
+mod hash;
+mod incremental;
+mod index;
+mod merge;
+mod metadata;
+mod progress;
+mod split;
+mod temporal;
+mod verify;
+
+use std::path::{Path, PathBuf};
+use std::time::Instant;
+
+use clap::Parser;
+use console::style;
+use humansize::{BINARY, format_size};
+
+use cli::{Cli, Command};
+
 fn main() {
-    println!("Hello, world!");
+    let cli = Cli::parse();
+
+    if let Some(threads) = cli.threads {
+        rayon::ThreadPoolBuilder::new()
+            .num_threads(threads)
+            .build_global()
+            .ok();
+    }
+
+    let result = match cli.command {
+        Command::Create {
+            archive,
+            paths,
+            compress: codec_name,
+            level,
+            no_ignore,
+            encrypt,
+        } => cmd_create(
+            &archive,
+            &paths,
+            &codec_name,
+            level,
+            no_ignore,
+            encrypt,
+            cli.quiet,
+        ),
+        Command::Extract {
+            archive,
+            output,
+            encrypt,
+        } => {
+            let dest = output.unwrap_or_else(|| PathBuf::from("."));
+            cmd_extract(&archive, &dest, encrypt, cli.quiet)
+        }
+        Command::List { archive, long } => cmd_list(&archive, long),
+        Command::Info { archive } => cmd_info(&archive),
+        Command::Verify { archive } => cmd_verify(&archive, cli.quiet),
+    };
+
+    if let Err(e) = result {
+        eprintln!("{} {}", style("error:").red().bold(), e);
+        std::process::exit(1);
+    }
+}
+
+fn cmd_create(
+    archive: &Path,
+    paths: &[PathBuf],
+    codec_name: &str,
+    level: i32,
+    no_ignore: bool,
+    encrypt: bool,
+    quiet: bool,
+) -> error::Result<()> {
+    let codec = compress::codec_from_str(codec_name)?;
+
+    let passphrase = if encrypt {
+        if !quiet {
+            println!(
+                "  {}",
+                style("encryption enabled (dedup disabled for privacy)").dim()
+            );
+        }
+        let pass = rpassword::prompt_password("Passphrase: ")
+            .map_err(|e| error::Error::Io { source: e })?;
+        let confirm = rpassword::prompt_password("Confirm passphrase: ")
+            .map_err(|e| error::Error::Io { source: e })?;
+        if pass != confirm {
+            return Err(error::Error::InvalidArchive(
+                "passphrases do not match".into(),
+            ));
+        }
+        Some(pass.into_bytes())
+    } else {
+        None
+    };
+
+    let opts = archive::CreateOptions {
+        codec,
+        level,
+        show_progress: !quiet,
+        respect_gitignore: !no_ignore,
+        passphrase,
+    };
+
+    let source_refs: Vec<&std::path::Path> = paths.iter().map(|p| p.as_path()).collect();
+
+    let start = Instant::now();
+    let stats = archive::create_archive(archive, &source_refs, &opts)?;
+    let elapsed = start.elapsed();
+
+    if !quiet {
+        let ratio = if stats.total_input_size > 0 {
+            stats.total_input_size as f64 / stats.archive_size as f64
+        } else {
+            1.0
+        };
+
+        let throughput = if elapsed.as_secs_f64() > 0.0 {
+            stats.total_input_size as f64 / elapsed.as_secs_f64() / (1024.0 * 1024.0)
+        } else {
+            0.0
+        };
+
+        println!();
+        println!(
+            "  {} {}",
+            style("created").green().bold(),
+            style(archive.display()).white().bold(),
+        );
+        println!();
+        println!(
+            "  {}  {}  {}",
+            style(format!(
+                "{} → {}",
+                format_size(stats.total_input_size, BINARY),
+                format_size(stats.archive_size, BINARY)
+            ))
+            .white(),
+            style(format!("{:.1}x", ratio)).cyan().bold(),
+            style(compress::codec_name(codec)).dim(),
+        );
+        println!(
+            "  {}  {}",
+            style(format!(
+                "{} files, {} dirs",
+                stats.file_count, stats.dir_count
+            ))
+            .dim(),
+            style(format!(
+                "{} blocks ({} unique)",
+                stats.block_count, stats.unique_blocks
+            ))
+            .dim(),
+        );
+
+        if stats.dedup_savings > 0 {
+            println!(
+                "  {} {}",
+                style(format!(
+                    "{} saved by dedup",
+                    format_size(stats.dedup_savings, BINARY)
+                ))
+                .green()
+                .bold(),
+                style(format!(
+                    "({} duplicate blocks eliminated)",
+                    stats.block_count - stats.unique_blocks
+                ))
+                .dim(),
+            );
+        }
+
+        println!(
+            "  {}",
+            style(format!(
+                "{:.2}s  {:.0} MB/s",
+                elapsed.as_secs_f64(),
+                throughput
+            ))
+            .dim(),
+        );
+    }
+
+    Ok(())
+}
+
+fn cmd_extract(archive: &Path, dest: &Path, encrypt: bool, quiet: bool) -> error::Result<()> {
+    let start = Instant::now();
+    let stats = if encrypt {
+        let pass = rpassword::prompt_password("Passphrase: ")
+            .map_err(|e| error::Error::Io { source: e })?;
+        extract::extract_archive_encrypted(archive, dest, pass.as_bytes())?
+    } else {
+        extract::extract_archive(archive, dest)?
+    };
+    let elapsed = start.elapsed();
+
+    if !quiet {
+        println!();
+        println!(
+            "  {} {} {} {}",
+            style("extracted").green().bold(),
+            style(archive.display()).white().bold(),
+            style("->").dim(),
+            style(dest.display()).white(),
+        );
+        println!();
+        println!(
+            "  {}  {}",
+            style(format_size(stats.total_size, BINARY)).white(),
+            style(format!(
+                "{} files, {} dirs",
+                stats.file_count, stats.dir_count
+            ))
+            .dim(),
+        );
+        println!(
+            "  {}",
+            style(format!("{:.2}s", elapsed.as_secs_f64())).dim()
+        );
+    }
+
+    Ok(())
+}
+
+fn cmd_list(archive: &Path, long: bool) -> error::Result<()> {
+    let entries = extract::list_archive(archive)?;
+
+    for entry in &entries {
+        if long {
+            let type_char = match &entry.file_type {
+                format::FileType::Directory => 'd',
+                format::FileType::File => '-',
+                format::FileType::Symlink(_) => 'l',
+                format::FileType::Hardlink(_) => 'h',
+            };
+            let size = if matches!(entry.file_type, format::FileType::File) {
+                format_size(entry.size, BINARY)
+            } else {
+                "-".to_string()
+            };
+            println!(
+                "{}{:o}  {:>10}  {}",
+                type_char,
+                entry.mode & 0o7777,
+                size,
+                entry.path_display()
+            );
+        } else {
+            println!("{}", entry.path_display());
+        }
+    }
+
+    if long {
+        println!("\n{} entries", style(entries.len()).bold());
+    }
+
+    Ok(())
+}
+
+fn cmd_info(archive: &Path) -> error::Result<()> {
+    let file = std::fs::File::open(archive).map_err(|e| error::Error::io_path(archive, e))?;
+    let mut reader = std::io::BufReader::new(file);
+
+    let header = format::ArchiveHeader::read_from(&mut reader)?;
+    let footer = extract::read_footer(&mut reader)?;
+    let entries = extract::read_index(&mut reader, &footer)?;
+
+    let file_count = entries
+        .iter()
+        .filter(|e| matches!(e.file_type, format::FileType::File))
+        .count();
+    let dir_count = entries
+        .iter()
+        .filter(|e| matches!(e.file_type, format::FileType::Directory))
+        .count();
+    let total_size: u64 = entries
+        .iter()
+        .filter(|e| matches!(e.file_type, format::FileType::File))
+        .map(|e| e.size)
+        .sum();
+
+    let archive_size = std::fs::metadata(archive)
+        .map_err(|e| error::Error::io_path(archive, e))?
+        .len();
+
+    println!("{}", style("Archive Info").bold().underlined());
+    println!("  File:          {}", archive.display());
+    println!("  Format:        TRDG v{}", header.version);
+    println!("  Archive size:  {}", format_size(archive_size, BINARY));
+    println!("  Original size: {}", format_size(total_size, BINARY));
+    if total_size > 0 {
+        println!(
+            "  Ratio:         {:.1}x",
+            total_size as f64 / archive_size as f64
+        );
+    }
+    println!("  Files:         {}", file_count);
+    println!("  Directories:   {}", dir_count);
+    println!("  Blocks:        {}", footer.block_count);
+
+    let mut flags = vec![];
+    if header.is_encrypted() {
+        flags.push("encrypted");
+    }
+    if header.is_erasure_coded() {
+        flags.push("erasure-coded");
+    }
+    if header.is_append_only() {
+        flags.push("append-only");
+    }
+    if flags.is_empty() {
+        flags.push("none");
+    }
+    println!("  Flags:         {}", flags.join(", "));
+    println!("  Root hash:     {}", hex::encode(&footer.root_hash[..8]));
+
+    Ok(())
+}
+
+fn cmd_verify(archive: &Path, quiet: bool) -> error::Result<()> {
+    let start = Instant::now();
+    let report = verify::verify_full(archive)?;
+    let elapsed = start.elapsed();
+
+    if !quiet {
+        println!();
+        if report.blocks_corrupted == 0 {
+            println!(
+                "  {} {}",
+                style("verified").green().bold(),
+                style(archive.display()).white().bold(),
+            );
+        } else {
+            println!(
+                "  {} {}",
+                style("CORRUPTED").red().bold(),
+                style(archive.display()).white().bold(),
+            );
+        }
+        println!();
+        println!(
+            "  header {}  footer {}  index {}",
+            if report.header_ok {
+                style("ok").green()
+            } else {
+                style("FAIL").red().bold()
+            },
+            if report.footer_ok {
+                style("ok").green()
+            } else {
+                style("FAIL").red().bold()
+            },
+            if report.index_ok {
+                style("ok").green()
+            } else {
+                style("FAIL").red().bold()
+            },
+        );
+        println!(
+            "  blocks {}/{} ok, {} corrupted",
+            style(report.blocks_ok).green(),
+            report.blocks_checked,
+            if report.blocks_corrupted > 0 {
+                style(report.blocks_corrupted).red().bold()
+            } else {
+                style(0u64).green().bold()
+            },
+        );
+        println!(
+            "  {}",
+            style(format!("{:.2}s", elapsed.as_secs_f64())).dim()
+        );
+
+        if !report.corrupted_blocks.is_empty() {
+            println!();
+            println!("  {}", style("damage map:").red().bold());
+            for block in &report.corrupted_blocks {
+                println!(
+                    "    offset {}: {} (expected {})",
+                    block.offset, block.error, block.expected_hash
+                );
+            }
+        }
+
+        if !report.affected_files.is_empty() {
+            println!();
+            println!("  {}", style("affected files:").red().bold());
+            for file in &report.affected_files {
+                println!("    {}", style(file).red());
+            }
+        }
+
+        if report.blocks_corrupted == 0 {
+            println!();
+        }
+    }
+
+    if report.blocks_corrupted > 0 {
+        std::process::exit(1);
+    }
+
+    Ok(())
 }
