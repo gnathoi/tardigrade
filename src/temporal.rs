@@ -36,6 +36,7 @@ const WRITE_BUFFER_SIZE: usize = 256 * 1024;
 pub struct Snapshot {
     pub generation: u64,
     pub footer: Footer,
+    #[allow(dead_code)]
     pub footer_offset: u64,
     pub file_count: usize,
     pub dir_count: usize,
@@ -126,8 +127,7 @@ pub fn append_archive(
     reader.seek(SeekFrom::Start(old_footer.index_offset))?;
     let mut index_data = vec![0u8; old_footer.index_length as usize];
     reader.read_exact(&mut index_data)?;
-    let old_entries =
-        deserialize_index(&index_data, old_footer.index_length as usize * 10)?;
+    let old_entries = deserialize_index(&index_data, old_footer.index_length as usize * 10)?;
 
     let mut dedup = DedupStore::new();
     for entry in &old_entries {
@@ -298,7 +298,6 @@ pub fn append_archive(
     let index_offset = current_offset;
     let index_length = index_data.len() as u64;
     writer.write_all(&index_data)?;
-    current_offset += index_length;
 
     // Use a dummy header for merkle root (reuse archive header)
     let header_bytes = vec![0u8; ARCHIVE_HEADER_SIZE]; // placeholder
@@ -350,13 +349,16 @@ pub fn extract_generation(
         return Err(Error::NoSnapshots);
     }
 
-    let snapshot = snapshots.iter().find(|s| s.generation == generation).ok_or_else(|| {
-        Error::InvalidArchive(format!(
-            "generation {} not found (archive has {} generations)",
-            generation,
-            snapshots.len()
-        ))
-    })?;
+    let snapshot = snapshots
+        .iter()
+        .find(|s| s.generation == generation)
+        .ok_or_else(|| {
+            Error::InvalidArchive(format!(
+                "generation {} not found (archive has {} generations)",
+                generation,
+                snapshots.len()
+            ))
+        })?;
 
     // Read the generation's index
     let file = File::open(archive_path).map_err(|e| Error::io_path(archive_path, e))?;
@@ -365,8 +367,7 @@ pub fn extract_generation(
     reader.seek(SeekFrom::Start(snapshot.footer.index_offset))?;
     let mut index_data = vec![0u8; snapshot.footer.index_length as usize];
     reader.read_exact(&mut index_data)?;
-    let entries =
-        deserialize_index(&index_data, snapshot.footer.index_length as usize * 10)?;
+    let entries = deserialize_index(&index_data, snapshot.footer.index_length as usize * 10)?;
 
     // Extract using the generation's file entries
     // Blocks may be from any generation (deduped)
@@ -376,7 +377,6 @@ pub fn extract_generation(
         file_count: 0,
         dir_count: 0,
         total_size: 0,
-        errors: 0,
     };
 
     let mut block_cache: HashMap<u64, Arc<Vec<u8>>> = HashMap::new();
@@ -410,7 +410,9 @@ pub fn extract_generation(
             if end > block_data.len() {
                 return Err(Error::InvalidArchive(format!(
                     "block ref out of bounds: {}..{} > {}",
-                    start, end, block_data.len()
+                    start,
+                    end,
+                    block_data.len()
                 )));
             }
             file_data.extend_from_slice(&block_data[start..end]);
@@ -549,31 +551,18 @@ mod tests {
         std::fs::write(src.join("v1.txt"), "version 1").unwrap();
 
         let archive_path = dir.path().join("temporal.tg");
-        create_archive(
-            &archive_path,
-            &[src.as_path()],
-            &CreateOptions::default(),
-        )
-        .unwrap();
+        create_archive(&archive_path, &[src.as_path()], &CreateOptions::default()).unwrap();
 
         // Append generation 1
         std::fs::write(src.join("v2.txt"), "version 2").unwrap();
-        let stats = append_archive(
-            &archive_path,
-            &[src.as_path()],
-            &CreateOptions::default(),
-        )
-        .unwrap();
+        let stats =
+            append_archive(&archive_path, &[src.as_path()], &CreateOptions::default()).unwrap();
         assert_eq!(stats.generation, 1);
 
         // Append generation 2
         std::fs::write(src.join("v3.txt"), "version 3").unwrap();
-        let stats = append_archive(
-            &archive_path,
-            &[src.as_path()],
-            &CreateOptions::default(),
-        )
-        .unwrap();
+        let stats =
+            append_archive(&archive_path, &[src.as_path()], &CreateOptions::default()).unwrap();
         assert_eq!(stats.generation, 2);
 
         // List generations
@@ -590,22 +579,12 @@ mod tests {
         std::fs::write(src.join("file.txt"), "gen 0 content").unwrap();
 
         let archive_path = dir.path().join("temporal.tg");
-        create_archive(
-            &archive_path,
-            &[src.as_path()],
-            &CreateOptions::default(),
-        )
-        .unwrap();
+        create_archive(&archive_path, &[src.as_path()], &CreateOptions::default()).unwrap();
 
         // Append with different content
         std::fs::write(src.join("file.txt"), "gen 1 content").unwrap();
         std::fs::write(src.join("new.txt"), "new in gen 1").unwrap();
-        append_archive(
-            &archive_path,
-            &[src.as_path()],
-            &CreateOptions::default(),
-        )
-        .unwrap();
+        append_archive(&archive_path, &[src.as_path()], &CreateOptions::default()).unwrap();
 
         // Extract generation 0
         let dest0 = dir.path().join("gen0");
@@ -639,22 +618,13 @@ mod tests {
         std::fs::write(src.join("big.txt"), &big_data).unwrap();
 
         let archive_path = dir.path().join("dedup.tg");
-        create_archive(
-            &archive_path,
-            &[src.as_path()],
-            &CreateOptions::default(),
-        )
-        .unwrap();
+        create_archive(&archive_path, &[src.as_path()], &CreateOptions::default()).unwrap();
 
         let size_before = std::fs::metadata(&archive_path).unwrap().len();
 
         // Append same content — blocks should be reused
-        let stats = append_archive(
-            &archive_path,
-            &[src.as_path()],
-            &CreateOptions::default(),
-        )
-        .unwrap();
+        let stats =
+            append_archive(&archive_path, &[src.as_path()], &CreateOptions::default()).unwrap();
 
         assert!(stats.reused_blocks > 0);
 

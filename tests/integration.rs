@@ -21,11 +21,7 @@ fn create_test_dir(dir: &Path) {
     fs::create_dir_all(dir.join("subdir")).unwrap();
     fs::write(dir.join("hello.txt"), "Hello, tardigrade!").unwrap();
     fs::write(dir.join("world.txt"), "World data here.").unwrap();
-    fs::write(
-        dir.join("subdir/nested.txt"),
-        "Nested file content.",
-    )
-    .unwrap();
+    fs::write(dir.join("subdir/nested.txt"), "Nested file content.").unwrap();
     // A larger file for dedup testing
     fs::write(dir.join("big.txt"), "x".repeat(100_000)).unwrap();
     fs::write(dir.join("big_copy.txt"), "x".repeat(100_000)).unwrap();
@@ -69,15 +65,28 @@ fn cli_create_extract_round_trip() {
         .args(["create", archive.to_str().unwrap(), src.to_str().unwrap()])
         .output()
         .unwrap();
-    assert!(output.status.success(), "create failed: {}", String::from_utf8_lossy(&output.stderr));
+    assert!(
+        output.status.success(),
+        "create failed: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
     assert!(archive.exists());
 
     // Extract
     let output = tdg()
-        .args(["extract", archive.to_str().unwrap(), "-o", dest.to_str().unwrap()])
+        .args([
+            "extract",
+            archive.to_str().unwrap(),
+            "-o",
+            dest.to_str().unwrap(),
+        ])
         .output()
         .unwrap();
-    assert!(output.status.success(), "extract failed: {}", String::from_utf8_lossy(&output.stderr));
+    assert!(
+        output.status.success(),
+        "extract failed: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
     assert_eq!(
         fs::read_to_string(dest.join("hello.txt")).unwrap(),
         "Hello, tardigrade!"
@@ -98,7 +107,12 @@ fn cli_info() {
 
     let archive = tmp.path().join("info.tg");
     tdg()
-        .args(["create", archive.to_str().unwrap(), src.to_str().unwrap(), "-q"])
+        .args([
+            "create",
+            archive.to_str().unwrap(),
+            src.to_str().unwrap(),
+            "-q",
+        ])
         .output()
         .unwrap();
 
@@ -122,7 +136,12 @@ fn cli_verify() {
 
     let archive = tmp.path().join("verify.tg");
     tdg()
-        .args(["create", archive.to_str().unwrap(), src.to_str().unwrap(), "-q"])
+        .args([
+            "create",
+            archive.to_str().unwrap(),
+            src.to_str().unwrap(),
+            "-q",
+        ])
         .output()
         .unwrap();
 
@@ -146,7 +165,12 @@ fn cli_list() {
 
     let archive = tmp.path().join("list.tg");
     tdg()
-        .args(["create", archive.to_str().unwrap(), src.to_str().unwrap(), "-q"])
+        .args([
+            "create",
+            archive.to_str().unwrap(),
+            src.to_str().unwrap(),
+            "-q",
+        ])
         .output()
         .unwrap();
 
@@ -182,7 +206,12 @@ fn cli_temporal_workflow() {
 
     // Create initial archive
     let output = tdg()
-        .args(["create", archive.to_str().unwrap(), src.to_str().unwrap(), "-q"])
+        .args([
+            "create",
+            archive.to_str().unwrap(),
+            src.to_str().unwrap(),
+            "-q",
+        ])
         .output()
         .unwrap();
     assert!(output.status.success(), "initial create failed");
@@ -192,12 +221,24 @@ fn cli_temporal_workflow() {
     fs::write(src.join("v2.txt"), "new in gen 1").unwrap();
 
     let output = tdg()
-        .args(["create", "--append", archive.to_str().unwrap(), src.to_str().unwrap()])
+        .args([
+            "create",
+            "--append",
+            archive.to_str().unwrap(),
+            src.to_str().unwrap(),
+        ])
         .output()
         .unwrap();
-    assert!(output.status.success(), "append failed: {}", String::from_utf8_lossy(&output.stderr));
+    assert!(
+        output.status.success(),
+        "append failed: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
     let stdout = String::from_utf8_lossy(&output.stdout);
-    assert!(stdout.contains("appended") || stdout.contains("generation"), "expected 'appended' in: {stdout}");
+    assert!(
+        stdout.contains("appended") || stdout.contains("generation"),
+        "expected 'appended' in: {stdout}"
+    );
 
     // Log
     let output = tdg()
@@ -214,31 +255,46 @@ fn cli_temporal_workflow() {
     let output = tdg()
         .args([
             "extract",
-            "--generation", "0",
+            "--generation",
+            "0",
             archive.to_str().unwrap(),
-            "-o", dest0.to_str().unwrap(),
+            "-o",
+            dest0.to_str().unwrap(),
         ])
         .output()
         .unwrap();
-    assert!(output.status.success(), "extract gen 0 failed: {}", String::from_utf8_lossy(&output.stderr));
+    assert!(
+        output.status.success(),
+        "extract gen 0 failed: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
     assert_eq!(
         fs::read_to_string(dest0.join("v1.txt")).unwrap(),
         "version 1 content"
     );
-    assert!(!dest0.join("v2.txt").exists(), "v2.txt should not exist in gen 0");
+    assert!(
+        !dest0.join("v2.txt").exists(),
+        "v2.txt should not exist in gen 0"
+    );
 
     // Extract generation 1 (appended)
     let dest1 = tmp.path().join("gen1");
     let output = tdg()
         .args([
             "extract",
-            "--generation", "1",
+            "--generation",
+            "1",
             archive.to_str().unwrap(),
-            "-o", dest1.to_str().unwrap(),
+            "-o",
+            dest1.to_str().unwrap(),
         ])
         .output()
         .unwrap();
-    assert!(output.status.success(), "extract gen 1 failed: {}", String::from_utf8_lossy(&output.stderr));
+    assert!(
+        output.status.success(),
+        "extract gen 1 failed: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
     assert_eq!(
         fs::read_to_string(dest1.join("v1.txt")).unwrap(),
         "version 2 content"
@@ -262,7 +318,12 @@ fn cli_incremental_workflow() {
 
     let base = tmp.path().join("base.tg");
     tdg()
-        .args(["create", base.to_str().unwrap(), src.to_str().unwrap(), "-q"])
+        .args([
+            "create",
+            base.to_str().unwrap(),
+            src.to_str().unwrap(),
+            "-q",
+        ])
         .output()
         .unwrap();
 
@@ -273,15 +334,23 @@ fn cli_incremental_workflow() {
     let output = tdg()
         .args([
             "create",
-            "--incremental", base.to_str().unwrap(),
+            "--incremental",
+            base.to_str().unwrap(),
             diff.to_str().unwrap(),
             src.to_str().unwrap(),
         ])
         .output()
         .unwrap();
-    assert!(output.status.success(), "incremental create failed: {}", String::from_utf8_lossy(&output.stderr));
+    assert!(
+        output.status.success(),
+        "incremental create failed: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
     let stdout = String::from_utf8_lossy(&output.stdout);
-    assert!(stdout.contains("incremental") || stdout.contains("reused"), "expected 'incremental' in: {stdout}");
+    assert!(
+        stdout.contains("incremental") || stdout.contains("reused"),
+        "expected 'incremental' in: {stdout}"
+    );
 
     // Incremental archive should be smaller than base
     let base_size = fs::metadata(&base).unwrap().len();
@@ -296,17 +365,20 @@ fn cli_incremental_workflow() {
     let output = tdg()
         .args([
             "extract",
-            "--base", base.to_str().unwrap(),
+            "--base",
+            base.to_str().unwrap(),
             diff.to_str().unwrap(),
-            "-o", dest.to_str().unwrap(),
+            "-o",
+            dest.to_str().unwrap(),
         ])
         .output()
         .unwrap();
-    assert!(output.status.success(), "incremental extract failed: {}", String::from_utf8_lossy(&output.stderr));
-    assert_eq!(
-        fs::read_to_string(dest.join("shared.txt")).unwrap(),
-        shared
+    assert!(
+        output.status.success(),
+        "incremental extract failed: {}",
+        String::from_utf8_lossy(&output.stderr)
     );
+    assert_eq!(fs::read_to_string(dest.join("shared.txt")).unwrap(), shared);
     assert_eq!(
         fs::read_to_string(dest.join("new.txt")).unwrap(),
         "brand new file"
@@ -331,8 +403,24 @@ fn cli_merge_workflow() {
 
     let a_tg = tmp.path().join("a.tg");
     let b_tg = tmp.path().join("b.tg");
-    tdg().args(["create", a_tg.to_str().unwrap(), src_a.to_str().unwrap(), "-q"]).output().unwrap();
-    tdg().args(["create", b_tg.to_str().unwrap(), src_b.to_str().unwrap(), "-q"]).output().unwrap();
+    tdg()
+        .args([
+            "create",
+            a_tg.to_str().unwrap(),
+            src_a.to_str().unwrap(),
+            "-q",
+        ])
+        .output()
+        .unwrap();
+    tdg()
+        .args([
+            "create",
+            b_tg.to_str().unwrap(),
+            src_b.to_str().unwrap(),
+            "-q",
+        ])
+        .output()
+        .unwrap();
 
     let merged = tmp.path().join("merged.tg");
     let output = tdg()
@@ -340,23 +428,42 @@ fn cli_merge_workflow() {
             "merge",
             a_tg.to_str().unwrap(),
             b_tg.to_str().unwrap(),
-            "-o", merged.to_str().unwrap(),
+            "-o",
+            merged.to_str().unwrap(),
         ])
         .output()
         .unwrap();
-    assert!(output.status.success(), "merge failed: {}", String::from_utf8_lossy(&output.stderr));
+    assert!(
+        output.status.success(),
+        "merge failed: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
     let stdout = String::from_utf8_lossy(&output.stdout);
     assert!(stdout.contains("merged"));
 
     // Verify merged archive contains both
     let dest = tmp.path().join("extracted");
     tdg()
-        .args(["extract", merged.to_str().unwrap(), "-o", dest.to_str().unwrap()])
+        .args([
+            "extract",
+            merged.to_str().unwrap(),
+            "-o",
+            dest.to_str().unwrap(),
+        ])
         .output()
         .unwrap();
-    assert!(dest.join("only_a.txt").exists(), "only_a.txt missing from merge");
-    assert!(dest.join("only_b.txt").exists(), "only_b.txt missing from merge");
-    assert!(dest.join("shared.txt").exists(), "shared.txt missing from merge");
+    assert!(
+        dest.join("only_a.txt").exists(),
+        "only_a.txt missing from merge"
+    );
+    assert!(
+        dest.join("only_b.txt").exists(),
+        "only_b.txt missing from merge"
+    );
+    assert!(
+        dest.join("shared.txt").exists(),
+        "shared.txt missing from merge"
+    );
 
     // Merged archive should dedup shared content
     let a_size = fs::metadata(&a_tg).unwrap().len();
@@ -388,7 +495,12 @@ fn cli_split_join_workflow() {
 
     let archive = tmp.path().join("big.tg");
     tdg()
-        .args(["create", archive.to_str().unwrap(), src.to_str().unwrap(), "-q"])
+        .args([
+            "create",
+            archive.to_str().unwrap(),
+            src.to_str().unwrap(),
+            "-q",
+        ])
         .output()
         .unwrap();
 
@@ -400,7 +512,11 @@ fn cli_split_join_workflow() {
         .args(["split", archive.to_str().unwrap(), "--size", &vol_size])
         .output()
         .unwrap();
-    assert!(output.status.success(), "split failed: {}", String::from_utf8_lossy(&output.stderr));
+    assert!(
+        output.status.success(),
+        "split failed: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
     let stdout = String::from_utf8_lossy(&output.stdout);
     assert!(stdout.contains("split"));
 
@@ -415,7 +531,11 @@ fn cli_split_join_workflow() {
         .map(|e| e.path())
         .collect();
     volumes.sort();
-    assert!(volumes.len() >= 2, "expected at least 2 volumes, got {}", volumes.len());
+    assert!(
+        volumes.len() >= 2,
+        "expected at least 2 volumes, got {}",
+        volumes.len()
+    );
 
     // Join
     let joined = tmp.path().join("joined.tg");
@@ -430,7 +550,11 @@ fn cli_split_join_workflow() {
         .args(args.iter().map(|s| s.as_str()).collect::<Vec<_>>())
         .output()
         .unwrap();
-    assert!(output.status.success(), "join failed: {}", String::from_utf8_lossy(&output.stderr));
+    assert!(
+        output.status.success(),
+        "join failed: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
 
     // Verify joined matches original
     let original = fs::read(&archive).unwrap();
@@ -440,7 +564,12 @@ fn cli_split_join_workflow() {
     // Extract from joined and verify
     let dest = tmp.path().join("extracted");
     let output = tdg()
-        .args(["extract", joined.to_str().unwrap(), "-o", dest.to_str().unwrap()])
+        .args([
+            "extract",
+            joined.to_str().unwrap(),
+            "-o",
+            dest.to_str().unwrap(),
+        ])
         .output()
         .unwrap();
     assert!(output.status.success());
@@ -491,14 +620,23 @@ fn cli_convert_tar() {
         ])
         .output()
         .unwrap();
-    assert!(output.status.success(), "convert failed: {}", String::from_utf8_lossy(&output.stderr));
+    assert!(
+        output.status.success(),
+        "convert failed: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
     let stdout = String::from_utf8_lossy(&output.stdout);
     assert!(stdout.contains("converted"));
 
     // Extract the .tg and verify
     let dest = tmp.path().join("extracted");
     let output = tdg()
-        .args(["extract", tg_path.to_str().unwrap(), "-o", dest.to_str().unwrap()])
+        .args([
+            "extract",
+            tg_path.to_str().unwrap(),
+            "-o",
+            dest.to_str().unwrap(),
+        ])
         .output()
         .unwrap();
     assert!(output.status.success());
@@ -536,10 +674,19 @@ fn cli_extract_tar_auto_detect() {
 
     let dest = tmp.path().join("extracted");
     let output = tdg()
-        .args(["extract", tar_path.to_str().unwrap(), "-o", dest.to_str().unwrap()])
+        .args([
+            "extract",
+            tar_path.to_str().unwrap(),
+            "-o",
+            dest.to_str().unwrap(),
+        ])
         .output()
         .unwrap();
-    assert!(output.status.success(), "auto-detect extract failed: {}", String::from_utf8_lossy(&output.stderr));
+    assert!(
+        output.status.success(),
+        "auto-detect extract failed: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
     assert_eq!(
         fs::read_to_string(dest.join("auto.txt")).unwrap(),
         "auto-detected tar content"
@@ -572,7 +719,12 @@ fn cli_extract_tar_gz_auto_detect() {
 
     let dest = tmp.path().join("extracted");
     let output = tdg()
-        .args(["extract", targz_path.to_str().unwrap(), "-o", dest.to_str().unwrap()])
+        .args([
+            "extract",
+            targz_path.to_str().unwrap(),
+            "-o",
+            dest.to_str().unwrap(),
+        ])
         .output()
         .unwrap();
     assert!(output.status.success());
@@ -595,20 +747,30 @@ fn cli_ecc_flag() {
     let output = tdg()
         .args([
             "create",
-            "--ecc", "low",
+            "--ecc",
+            "low",
             archive.to_str().unwrap(),
             src.to_str().unwrap(),
             "-q",
         ])
         .output()
         .unwrap();
-    assert!(output.status.success(), "ecc create failed: {}", String::from_utf8_lossy(&output.stderr));
+    assert!(
+        output.status.success(),
+        "ecc create failed: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
     assert!(archive.exists());
 
     // Should still be extractable
     let dest = tmp.path().join("extracted");
     let output = tdg()
-        .args(["extract", archive.to_str().unwrap(), "-o", dest.to_str().unwrap()])
+        .args([
+            "extract",
+            archive.to_str().unwrap(),
+            "-o",
+            dest.to_str().unwrap(),
+        ])
         .output()
         .unwrap();
     assert!(output.status.success());
@@ -629,12 +791,20 @@ fn cli_quiet_mode() {
 
     let archive = tmp.path().join("quiet.tg");
     let output = tdg()
-        .args(["-q", "create", archive.to_str().unwrap(), src.to_str().unwrap()])
+        .args([
+            "-q",
+            "create",
+            archive.to_str().unwrap(),
+            src.to_str().unwrap(),
+        ])
         .output()
         .unwrap();
     assert!(output.status.success());
     let stdout = String::from_utf8_lossy(&output.stdout);
-    assert!(stdout.is_empty() || stdout.trim().is_empty(), "quiet mode should produce no output, got: {stdout}");
+    assert!(
+        stdout.is_empty() || stdout.trim().is_empty(),
+        "quiet mode should produce no output, got: {stdout}"
+    );
 }
 
 // ─── Compression options ───────────────────────────────────────────────────
@@ -650,7 +820,8 @@ fn cli_lz4_compression() {
     let output = tdg()
         .args([
             "create",
-            "--compress", "lz4",
+            "--compress",
+            "lz4",
             archive.to_str().unwrap(),
             src.to_str().unwrap(),
             "-q",
@@ -661,7 +832,12 @@ fn cli_lz4_compression() {
 
     let dest = tmp.path().join("extracted");
     let output = tdg()
-        .args(["extract", archive.to_str().unwrap(), "-o", dest.to_str().unwrap()])
+        .args([
+            "extract",
+            archive.to_str().unwrap(),
+            "-o",
+            dest.to_str().unwrap(),
+        ])
         .output()
         .unwrap();
     assert!(output.status.success());
@@ -681,13 +857,22 @@ fn cli_extract_nonexistent_file() {
         .unwrap();
     assert!(!output.status.success());
     let stderr = String::from_utf8_lossy(&output.stderr);
-    assert!(stderr.contains("error:"), "expected error message, got: {stderr}");
+    assert!(
+        stderr.contains("error:"),
+        "expected error message, got: {stderr}"
+    );
 }
 
 #[test]
 fn cli_merge_nonexistent() {
     let output = tdg()
-        .args(["merge", "/tmp/nope1.tg", "/tmp/nope2.tg", "-o", "/tmp/out.tg"])
+        .args([
+            "merge",
+            "/tmp/nope1.tg",
+            "/tmp/nope2.tg",
+            "-o",
+            "/tmp/out.tg",
+        ])
         .output()
         .unwrap();
     assert!(!output.status.success());
@@ -700,7 +885,11 @@ fn cli_convert_non_tar() {
     fs::write(&not_tar, "this is definitely not a tar file").unwrap();
 
     let output = tdg()
-        .args(["convert", not_tar.to_str().unwrap(), tmp.path().join("out.tg").to_str().unwrap()])
+        .args([
+            "convert",
+            not_tar.to_str().unwrap(),
+            tmp.path().join("out.tg").to_str().unwrap(),
+        ])
         .output()
         .unwrap();
     assert!(!output.status.success());

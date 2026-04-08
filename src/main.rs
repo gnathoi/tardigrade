@@ -1,4 +1,3 @@
-#![allow(dead_code)] // Many public APIs for future features (FUSE, etc.)
 
 mod archive;
 mod chunk;
@@ -290,7 +289,9 @@ fn cmd_append(
         println!(
             "  {} {} {}",
             style("appended").green().bold(),
-            style(format!("generation {}", stats.generation)).cyan().bold(),
+            style(format!("generation {}", stats.generation))
+                .cyan()
+                .bold(),
             style(archive.display()).white().bold(),
         );
         println!();
@@ -848,10 +849,7 @@ fn cmd_join(volumes: &[PathBuf], output: &Path, quiet: bool) -> error::Result<()
             style(output.display()).white().bold(),
         );
         println!();
-        println!(
-            "  {}",
-            style(format_size(size, BINARY)).white(),
-        );
+        println!("  {}", style(format_size(size, BINARY)).white(),);
         println!(
             "  {}",
             style(format!("{:.2}s", elapsed.as_secs_f64())).dim()

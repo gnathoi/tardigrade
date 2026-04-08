@@ -149,7 +149,6 @@ pub fn merge_archives(a_path: &Path, b_path: &Path, output_path: &Path) -> Resul
     let redundant_index_offset = if unique_blocks > 100 {
         let offset = current_offset;
         writer.write_all(&index_data)?;
-        current_offset += index_length;
         offset
     } else {
         index_offset

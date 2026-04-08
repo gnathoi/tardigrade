@@ -51,17 +51,8 @@ pub enum Error {
     #[error("archive is encrypted — use --encrypt to provide passphrase or --identity <keyfile>")]
     EncryptedArchive,
 
-    #[error("base archive required for incremental extraction — use --base <path>")]
-    BaseArchiveRequired,
-
-    #[error("feature not yet implemented: {0}")]
-    NotImplemented(String),
-
     #[error("volume error: {0}")]
     VolumeError(String),
-
-    #[error("merge conflict: {0}")]
-    MergeConflict(String),
 
     #[error("ECC error: {0}")]
     EccError(String),

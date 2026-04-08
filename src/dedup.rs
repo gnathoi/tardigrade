@@ -34,10 +34,12 @@ impl DedupStore {
     }
 
     /// Number of unique blocks stored
+    #[allow(dead_code)]
     pub fn len(&self) -> usize {
         self.map.len()
     }
 
+    #[allow(dead_code)]
     pub fn is_empty(&self) -> bool {
         self.map.is_empty()
     }

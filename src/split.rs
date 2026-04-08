@@ -25,7 +25,10 @@ pub fn split_archive(archive_path: &Path, max_size: u64) -> Result<Vec<PathBuf>>
     }
 
     let file = File::open(archive_path).map_err(|e| Error::io_path(archive_path, e))?;
-    let file_size = file.metadata().map_err(|e| Error::io_path(archive_path, e))?.len();
+    let file_size = file
+        .metadata()
+        .map_err(|e| Error::io_path(archive_path, e))?
+        .len();
     let mut reader = BufReader::new(file);
 
     // If archive fits in one volume, just copy it
@@ -84,7 +87,6 @@ pub fn split_archive(archive_path: &Path, max_size: u64) -> Result<Vec<PathBuf>>
 
     // Now split the file
     reader.seek(SeekFrom::Start(0))?;
-    let mut remaining = file_size;
     let mut file_pos: u64 = 0;
 
     let mut split_iter = split_points.iter().peekable();
@@ -108,10 +110,9 @@ pub fn split_archive(archive_path: &Path, max_size: u64) -> Result<Vec<PathBuf>>
 
         volumes.push(vol_path);
         file_pos = vol_end;
-        remaining = file_size - file_pos;
         vol_num += 1;
 
-        if remaining == 0 {
+        if file_pos >= file_size {
             break;
         }
     }
@@ -132,8 +133,7 @@ pub fn join_volumes(volume_paths: &[PathBuf], output_path: &Path) -> Result<()> 
     for vol_path in volume_paths {
         let file = File::open(vol_path).map_err(|e| Error::io_path(vol_path, e))?;
         let mut reader = BufReader::new(file);
-        std::io::copy(&mut reader, &mut writer)
-            .map_err(|e| Error::io_path(vol_path, e.into()))?;
+        std::io::copy(&mut reader, &mut writer).map_err(|e| Error::io_path(vol_path, e.into()))?;
     }
 
     writer.flush()?;
@@ -243,8 +243,7 @@ mod tests {
         let dest = dir.path().join("extracted");
         crate::extract::extract_archive(&joined_path, &dest).unwrap();
         for i in 0..50 {
-            let content =
-                std::fs::read_to_string(dest.join(format!("file_{i}.txt"))).unwrap();
+            let content = std::fs::read_to_string(dest.join(format!("file_{i}.txt"))).unwrap();
             assert_eq!(content, format!("content {i}").repeat(2000));
         }
     }

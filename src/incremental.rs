@@ -338,9 +338,7 @@ pub fn extract_incremental(
     let header = ArchiveHeader::read_from(&mut reader)?;
 
     if !header.is_incremental() {
-        return Err(Error::InvalidArchive(
-            "archive is not incremental".into(),
-        ));
+        return Err(Error::InvalidArchive("archive is not incremental".into()));
     }
 
     let base_file = File::open(base_path).map_err(|e| Error::io_path(base_path, e))?;
@@ -356,7 +354,6 @@ pub fn extract_incremental(
         file_count: 0,
         dir_count: 0,
         total_size: 0,
-        errors: 0,
     };
 
     let mut block_cache: HashMap<u64, Arc<Vec<u8>>> = HashMap::new();
@@ -473,12 +470,7 @@ mod tests {
         std::fs::write(src_base.join("old.txt"), "old content").unwrap();
 
         let base_path = dir.path().join("base.tg");
-        create_archive(
-            &base_path,
-            &[src_base.as_path()],
-            &CreateOptions::default(),
-        )
-        .unwrap();
+        create_archive(&base_path, &[src_base.as_path()], &CreateOptions::default()).unwrap();
 
         // Create incremental with shared + new files
         let src_inc = dir.path().join("inc");
@@ -525,12 +517,7 @@ mod tests {
         std::fs::write(src.join("file.txt"), "content").unwrap();
 
         let archive_path = dir.path().join("regular.tg");
-        create_archive(
-            &archive_path,
-            &[src.as_path()],
-            &CreateOptions::default(),
-        )
-        .unwrap();
+        create_archive(&archive_path, &[src.as_path()], &CreateOptions::default()).unwrap();
 
         // Try to extract as incremental — should fail (not incremental)
         let dest = dir.path().join("dest");
