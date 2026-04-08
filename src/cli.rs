@@ -153,6 +153,12 @@ pub enum Command {
         output: PathBuf,
     },
 
+    /// Repair corrupted blocks using ECC parity data
+    Repair {
+        /// Archive file to repair
+        archive: PathBuf,
+    },
+
     /// Convert a tar/tar.gz/tar.zst archive to .tg format
     Convert {
         /// Legacy archive to convert
