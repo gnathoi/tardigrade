@@ -78,8 +78,23 @@ jobs:
           path: artifacts
           merge-multiple: true
 
+      - name: Generate checksums
+        run: |
+          cd artifacts
+          sha256sum tdg-* > SHA256SUMS
+          b3sum tdg-* > B3SUMS
+
+      - name: Dogfood — create .tg archive of release artifacts
+        run: |
+          tar xzf artifacts/tdg-x86_64-unknown-linux-gnu.tar.gz -C /tmp
+          chmod +x /tmp/tdg
+          /tmp/tdg create --no-ignore tardigrade-dist.tg artifacts/
+          /tmp/tdg verify tardigrade-dist.tg
+
       - name: Create release
         uses: softprops/action-gh-release@v2
         with:
           generate_release_notes: true
-          files: artifacts/*
+          files: |
+            artifacts/*
+            tardigrade-dist.tg
