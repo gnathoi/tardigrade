@@ -2,6 +2,23 @@
 
 All notable changes to tardigrade will be documented in this file.
 
+## [0.3.0] - 2026-04-08
+
+### Added
+- ECC pipeline wired end-to-end: `--ecc low|medium|high` now produces real parity blocks during archive creation
+- ECC-aware extraction: corrupted blocks are automatically reconstructed from parity data during `tdg extract`
+- `tdg repair` command: scan for corruption, reconstruct using Reed-Solomon parity, write back in place
+- `tdg verify` reports ECC group count, parity blocks, and whether corrupted blocks are recoverable
+- `tdg info` shows ECC details (RS parameters, group count, parity block count) for erasure-coded archives
+- Claude Code skill (`tardigrade-skill/SKILL.md`): teaches Claude the full tdg CLI, format, and common workflows
+- 4 new integration tests: full ECC create/extract/verify flow, corruption repair, medium/high levels, repair on non-ECC archives
+
+### Changed
+- `CreateOptions` now accepts `ecc_level` field
+- `BlockHeader` gains `new_parity()` constructor and `is_parity()` method
+- `VerifyReport` includes ECC recoverability information
+- Removed `#[allow(dead_code)]` from erasure module (all functions now used)
+
 ## [0.2.0] - 2026-04-08
 
 ### Added
