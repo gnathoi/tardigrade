@@ -42,7 +42,6 @@ impl EccLevel {
         }
     }
 
-    #[allow(dead_code)]
     pub fn total_shards(&self) -> usize {
         self.data_shards + self.parity_shards
     }
@@ -51,7 +50,6 @@ impl EccLevel {
         (self.parity_shards as f64 / self.data_shards as f64) * 100.0
     }
 
-    #[allow(dead_code)]
     pub fn name(&self) -> &'static str {
         match self.parity_shards {
             2 => "low",
@@ -64,7 +62,6 @@ impl EccLevel {
 
 /// A group of data shards ready for ECC encoding.
 #[derive(Debug)]
-#[allow(dead_code)]
 pub struct EccGroup {
     /// The compressed block data for each shard in the group
     pub data_shards: Vec<Vec<u8>>,
@@ -72,7 +69,6 @@ pub struct EccGroup {
     pub shard_size: usize,
 }
 
-#[allow(dead_code)]
 impl EccGroup {
     pub fn new() -> Self {
         Self {
@@ -99,7 +95,6 @@ impl EccGroup {
 
 /// Encode parity shards for a group of data blocks.
 /// Returns the parity shard data (each exactly `shard_size` bytes).
-#[allow(dead_code)]
 pub fn encode_parity(group: &EccGroup, level: &EccLevel) -> Result<Vec<Vec<u8>>> {
     if group.is_empty() {
         return Ok(vec![]);
@@ -147,7 +142,6 @@ pub fn encode_parity(group: &EccGroup, level: &EccLevel) -> Result<Vec<Vec<u8>>>
 /// Reconstruct corrupted/missing shards using RS decoding.
 /// `shards` has length `data_shards + parity_shards`.
 /// Entries that are `None` are missing and will be reconstructed.
-#[allow(dead_code)]
 pub fn reconstruct_shards(shards: &mut [Option<Vec<u8>>], level: &EccLevel) -> Result<()> {
     let rs = ReedSolomon::new(level.data_shards, level.parity_shards)
         .map_err(|e| Error::Ecc(format!("failed to create RS decoder: {e}")))?;

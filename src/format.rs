@@ -23,6 +23,9 @@ pub const CODEC_NONE: u8 = 0;
 pub const CODEC_ZSTD: u8 = 1;
 pub const CODEC_LZ4: u8 = 2;
 
+// Block flag bits
+pub const BLOCK_FLAG_ECC: u8 = 0x01;
+
 // BlockRef flag bits
 pub const BLOCKREF_FLAG_EXTERNAL: u8 = 0x01;
 
@@ -151,6 +154,27 @@ impl BlockHeader {
         };
         hdr.checksum = hdr.compute_crc();
         hdr
+    }
+
+    /// Create a parity block header for ECC.
+    /// `shard_size` is stored in `uncompressed_size` for reconstruction.
+    pub fn new_parity(hash: Hash, data_size: u32, shard_size: u32, parity_count: u8) -> Self {
+        let mut hdr = Self {
+            hash,
+            compressed_size: data_size,
+            uncompressed_size: shard_size,
+            codec: CODEC_NONE,
+            flags: BLOCK_FLAG_ECC,
+            ecc_shard_count: parity_count,
+            reserved: 0,
+            checksum: 0,
+        };
+        hdr.checksum = hdr.compute_crc();
+        hdr
+    }
+
+    pub fn is_parity(&self) -> bool {
+        self.flags & BLOCK_FLAG_ECC != 0
     }
 
     fn compute_crc(&self) -> u32 {
