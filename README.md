@@ -45,6 +45,12 @@ tar is 45 years old. No checksums, no dedup, no seekability, single-threaded com
 - **Content-defined chunking** — FastCDC dedup works across modified files, not just identical ones
 - **Detailed verification** — `tdg verify` checks every block with damage mapping
 - **Cross-platform** — Linux, macOS, Windows
+- **Reed-Solomon ECC** — `--ecc low|medium|high` erasure coding for data recovery
+- **Temporal archives** — `--append` turns a .tg file into a portable Time Machine with `tdg log`
+- **Incremental archives** — `--incremental base.tg` stores only new/changed blocks
+- **Archive merging** — `tdg merge a.tg b.tg` with automatic cross-archive dedup
+- **Volume splitting** — `tdg split --size 4G` and `tdg join` for transport limits
+- **tar.zst compatibility** — `tdg extract` auto-detects tar/tar.gz/tar.zst, `tdg convert` migrates to .tg
 
 ## Install
 
@@ -88,6 +94,37 @@ tdg create --level 1 quick.tg ./data
 
 # Disable .gitignore filtering
 tdg create --no-ignore everything.tg ./repo
+
+# Temporal archives (append new generations)
+tdg create backup.tg ./project
+tdg create --append backup.tg ./project       # append generation 1
+tdg create --append backup.tg ./project       # append generation 2
+tdg log backup.tg                             # list all generations
+tdg extract --generation 0 backup.tg -o v0    # extract specific generation
+
+# Incremental archives (only store new/changed blocks)
+tdg create base.tg ./project
+tdg create --incremental base.tg diff.tg ./project
+tdg extract --base base.tg diff.tg -o ./restored
+
+# Merge archives
+tdg merge a.tg b.tg -o merged.tg
+
+# Split and join volumes
+tdg split archive.tg --size 4G
+tdg join archive.001.tg archive.002.tg -o archive.tg
+
+# Extract legacy tar archives (auto-detected)
+tdg extract legacy.tar.zst -o ./restored
+tdg extract legacy.tar.gz -o ./restored
+
+# Convert tar to .tg (with dedup)
+tdg convert legacy.tar.zst output.tg
+
+# Reed-Solomon erasure coding
+tdg create --ecc low archive.tg ./data        # RS(10,2) ~20% overhead
+tdg create --ecc medium archive.tg ./data     # RS(10,4) ~40% overhead
+tdg create --ecc high archive.tg ./data       # RS(10,6) ~60% overhead
 ```
 
 ## Example Output
@@ -183,34 +220,41 @@ When `--encrypt` is used:
 
 ## What's Next
 
-The wire format supports these features (flag bits reserved, fields in place). Implementation is in progress:
-
-- [ ] Reed-Solomon erasure coding (`--ecc low|medium|high`)
-- [ ] Temporal/append-only archives (`tdg log`, `tdg mount archive.tg@snapshot`)
-- [ ] Incremental archives (`--incremental base.tg`)
-- [ ] Archive merging (`tdg merge a.tg b.tg`)
+- [x] Reed-Solomon erasure coding (`--ecc low|medium|high`)
+- [x] Temporal/append-only archives (`tdg log`, `--append`, `--generation N`)
+- [x] Incremental archives (`--incremental base.tg`)
+- [x] Archive merging (`tdg merge a.tg b.tg`)
+- [x] Volume splitting (`tdg split --size 4G`, `tdg join`)
+- [x] tar.zst read compatibility (`tdg extract`, `tdg convert`)
 - [ ] FUSE mounting (`tdg mount archive.tg /mnt`)
-- [ ] Volume splitting (`tdg split --size 4G`)
-- [ ] tar.zst read compatibility
+- [ ] `tdg repair` — reconstruct corrupted blocks using ECC parity
+- [ ] `tdg diff archive.tg@1 archive.tg@3` — diff between temporal generations
 
 ## Architecture
 
 ```
 CLI (clap)
   |
-  +-- archive.rs    walk -> chunk (FastCDC) -> dedup -> compress -> write
-  +-- extract.rs    read footer -> parse index -> decompress -> verify -> write
-  +-- verify.rs     full integrity check with damage mapping
+  +-- archive.rs      walk -> chunk (FastCDC) -> dedup -> compress -> write
+  +-- extract.rs      read footer -> parse index -> decompress -> verify -> write
+  +-- verify.rs       full integrity check with damage mapping
   |
-  +-- chunk.rs      FastCDC content-defined chunking
-  +-- dedup.rs      content-addressed block store
-  +-- compress.rs   zstd / lz4 / none
-  +-- encrypt.rs    ChaCha20-Poly1305 + key encapsulation
-  +-- format.rs     wire format types (the foundation)
-  +-- hash.rs       BLAKE3 + Merkle tree
-  +-- index.rs      msgpack + zstd index serialization
-  +-- metadata.rs   POSIX metadata + path traversal protection
-  +-- progress.rs   indicatif progress bars
+  +-- chunk.rs        FastCDC content-defined chunking
+  +-- dedup.rs        content-addressed block store
+  +-- compress.rs     zstd / lz4 / none
+  +-- encrypt.rs      ChaCha20-Poly1305 + key encapsulation
+  +-- erasure.rs      Reed-Solomon erasure coding (RS 10,2/4/6)
+  +-- format.rs       wire format types (the foundation)
+  +-- hash.rs         BLAKE3 + Merkle tree
+  +-- index.rs        msgpack + zstd index serialization
+  +-- metadata.rs     POSIX metadata + path traversal protection
+  +-- progress.rs     indicatif progress bars
+  |
+  +-- temporal.rs     append-only archives + generation management
+  +-- incremental.rs  differential archives against a base
+  +-- merge.rs        content-addressed archive merging
+  +-- split.rs        volume splitting + reassembly
+  +-- compat.rs       tar/tar.gz/tar.zst read + conversion
 ```
 
 ## License
