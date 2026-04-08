@@ -23,10 +23,6 @@ pub const CODEC_NONE: u8 = 0;
 pub const CODEC_ZSTD: u8 = 1;
 pub const CODEC_LZ4: u8 = 2;
 
-// Block flag bits
-pub const BLOCK_FLAG_ENCRYPTED: u8 = 0x01;
-pub const BLOCK_FLAG_ECC: u8 = 0x02;
-
 // BlockRef flag bits
 pub const BLOCKREF_FLAG_EXTERNAL: u8 = 0x01;
 
@@ -248,14 +244,6 @@ pub struct BlockRef {
     pub slice_len: u32,   // length within decompressed block
     pub flags: u8,        // BLOCKREF_FLAG_EXTERNAL for incremental
     pub reserved: [u8; 3],
-}
-
-// ─── SparseExtent ───────────────────────────────────────────────────────────
-
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct SparseExtent {
-    pub offset: u64,
-    pub length: u64,
 }
 
 // ─── Footer (76 bytes) ─────────────────────────────────────────────────────

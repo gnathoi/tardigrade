@@ -10,9 +10,6 @@ use crate::format::Hash;
 /// Symmetric key for archive encryption (256-bit)
 pub type SymmetricKey = [u8; 32];
 
-/// Size of the AEAD authentication tag
-pub const TAG_SIZE: usize = 16;
-
 /// Derive a symmetric key from a passphrase using scrypt
 pub fn derive_key_from_passphrase(passphrase: &[u8], salt: &[u8; 16]) -> SymmetricKey {
     use blake3::Hasher;
@@ -160,7 +157,7 @@ mod tests {
 
         let ciphertext = encrypt_block(data, &key, &hash).unwrap();
         assert_ne!(ciphertext.as_slice(), data.as_slice());
-        assert_eq!(ciphertext.len(), data.len() + TAG_SIZE);
+        assert_eq!(ciphertext.len(), data.len() + 16);
 
         let plaintext = decrypt_block(&ciphertext, &key, &hash).unwrap();
         assert_eq!(plaintext, data);

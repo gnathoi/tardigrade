@@ -9,10 +9,8 @@ use indicatif::{MultiProgress, ProgressBar, ProgressStyle};
 pub struct ProgressStats {
     pub files_scanned: AtomicU64,
     pub bytes_scanned: AtomicU64,
-    pub bytes_compressed: AtomicU64,
     pub bytes_written: AtomicU64,
     pub dedup_savings: AtomicU64,
-    pub blocks_total: AtomicU64,
     pub blocks_deduped: AtomicU64,
 }
 
@@ -21,10 +19,8 @@ impl ProgressStats {
         Arc::new(Self {
             files_scanned: AtomicU64::new(0),
             bytes_scanned: AtomicU64::new(0),
-            bytes_compressed: AtomicU64::new(0),
             bytes_written: AtomicU64::new(0),
             dedup_savings: AtomicU64::new(0),
-            blocks_total: AtomicU64::new(0),
             blocks_deduped: AtomicU64::new(0),
         })
     }
@@ -114,38 +110,5 @@ impl CreateProgress {
     pub fn finish(&self) {
         self.main_bar.finish_and_clear();
         self.status_bar.finish_and_clear();
-    }
-}
-
-/// Progress display for extraction
-pub struct ExtractProgress {
-    bar: ProgressBar,
-}
-
-impl ExtractProgress {
-    pub fn new(total_files: u64) -> Self {
-        let style = ProgressStyle::with_template(
-            "  {bar:40.green/dark_gray} {percent:>3}%  {pos}/{len} files",
-        )
-        .unwrap()
-        .progress_chars("━━╸");
-
-        let bar = ProgressBar::new(total_files);
-        bar.set_style(style);
-        bar.enable_steady_tick(Duration::from_millis(80));
-
-        Self { bar }
-    }
-
-    pub fn inc(&self) {
-        self.bar.inc(1);
-    }
-
-    pub fn set_message(&self, msg: impl Into<std::borrow::Cow<'static, str>>) {
-        self.bar.set_message(msg);
-    }
-
-    pub fn finish(&self) {
-        self.bar.finish_and_clear();
     }
 }

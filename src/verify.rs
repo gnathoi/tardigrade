@@ -24,6 +24,7 @@ pub struct VerifyReport {
 pub struct CorruptedBlock {
     pub offset: u64,
     pub expected_hash: String,
+    #[allow(dead_code)]
     pub actual_hash: String,
     pub error: String,
 }

@@ -51,11 +51,14 @@ pub enum Error {
     #[error("archive is encrypted — use --encrypt to provide passphrase or --identity <keyfile>")]
     EncryptedArchive,
 
-    #[error("base archive required for incremental extraction — use --base <path>")]
-    BaseArchiveRequired,
+    #[error("volume: {0}")]
+    Volume(String),
 
-    #[error("feature not yet implemented: {0}")]
-    NotImplemented(String),
+    #[error("ecc: {0}")]
+    Ecc(String),
+
+    #[error("no snapshots found in archive")]
+    NoSnapshots,
 }
 
 pub type Result<T> = std::result::Result<T, Error>;

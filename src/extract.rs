@@ -133,7 +133,6 @@ fn extract_archive_inner(
         file_count: 0,
         dir_count: 0,
         total_size: 0,
-        errors: 0,
     };
 
     // Cache for decompressed blocks — uses Arc to avoid cloning large buffers
@@ -279,66 +278,11 @@ pub fn list_archive(archive_path: &Path) -> Result<Vec<FileEntry>> {
     read_index(&mut reader, &footer)
 }
 
-/// Verify archive integrity (check all block checksums).
-pub fn verify_archive(archive_path: &Path) -> Result<VerifyResult> {
-    let file = File::open(archive_path).map_err(|e| Error::io_path(archive_path, e))?;
-    let mut reader = BufReader::new(file);
-
-    let _header = ArchiveHeader::read_from(&mut reader)?;
-    let footer = read_footer(&mut reader)?;
-    let entries = read_index(&mut reader, &footer)?;
-
-    let mut result = VerifyResult {
-        blocks_checked: 0,
-        blocks_ok: 0,
-        blocks_corrupted: 0,
-        corrupted_files: vec![],
-    };
-
-    // Collect all unique block offsets
-    let mut checked_offsets = std::collections::HashSet::new();
-
-    for entry in &entries {
-        let mut file_ok = true;
-        for block_ref in &entry.block_refs {
-            if checked_offsets.contains(&block_ref.offset) {
-                continue;
-            }
-            checked_offsets.insert(block_ref.offset);
-            result.blocks_checked += 1;
-
-            match read_block(&mut reader, block_ref.offset, None) {
-                Ok(_) => result.blocks_ok += 1,
-                Err(_) => {
-                    result.blocks_corrupted += 1;
-                    file_ok = false;
-                }
-            }
-        }
-        if !file_ok {
-            result
-                .corrupted_files
-                .push(String::from_utf8_lossy(&entry.path).into_owned());
-        }
-    }
-
-    Ok(result)
-}
-
 #[derive(Debug)]
 pub struct ExtractStats {
     pub file_count: u64,
     pub dir_count: u64,
     pub total_size: u64,
-    pub errors: u64,
-}
-
-#[derive(Debug)]
-pub struct VerifyResult {
-    pub blocks_checked: u64,
-    pub blocks_ok: u64,
-    pub blocks_corrupted: u64,
-    pub corrupted_files: Vec<String>,
 }
 
 #[cfg(test)]
@@ -410,21 +354,6 @@ mod tests {
         assert!(!entries.is_empty());
         let paths: Vec<String> = entries.iter().map(|e| e.path_display()).collect();
         assert!(paths.iter().any(|p| p.contains("file.txt")));
-    }
-
-    #[test]
-    fn verify_clean_archive() {
-        let src = TempDir::new().unwrap();
-        fs::write(src.path().join("data.txt"), "some data to verify").unwrap();
-
-        let archive_dir = TempDir::new().unwrap();
-        let archive_path = archive_dir.path().join("verify.tg");
-
-        create_archive(&archive_path, &[src.path()], &CreateOptions::default()).unwrap();
-
-        let result = verify_archive(&archive_path).unwrap();
-        assert!(result.blocks_corrupted == 0);
-        assert!(result.blocks_ok > 0);
     }
 
     #[test]
