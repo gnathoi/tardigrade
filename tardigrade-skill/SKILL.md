@@ -92,6 +92,14 @@ Only works on archives created with `--ecc`. Scans all blocks, finds corruption,
 tdg log temporal.tg                        # list generations with file/dir counts
 ```
 
+### `tdg diff`
+
+```bash
+tdg diff temporal.tg --from 0 --to 2       # show changes between generations
+```
+
+Shows added, removed, and modified files between two temporal generations. Compares content by BLAKE3 block hashes (no block data read needed).
+
 ### `tdg merge`
 
 ```bash

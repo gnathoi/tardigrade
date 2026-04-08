@@ -33,7 +33,7 @@ Archive tool. Fast, checksummed, deduplicated.
 
 ## Why
 
-tar is 45 years old. No checksums, no dedup, no seekability, single-threaded compression, and a mess of incompatible extensions. tardigrade is what you'd build if you started over.
+tar is 45 years old. No checksums, no dedup, no seekability, single-threaded compression, and a mess of incompatible extensions. tardigrade is fast, safe and efficient using the modern tools at our disposal. 
 
 ## Features
 
