@@ -10,6 +10,7 @@ use crate::chunk::chunk_data;
 use crate::compress;
 use crate::dedup::DedupStore;
 use crate::encrypt::{self, KeyEncapsulation};
+use crate::erasure::{self, EccGroup, EccLevel};
 use crate::error::{Error, Result};
 use crate::format::*;
 use crate::hash::{hash_block, merkle_root};
@@ -33,6 +34,7 @@ pub struct CreateOptions {
     pub show_progress: bool,
     pub respect_gitignore: bool,
     pub passphrase: Option<Vec<u8>>,
+    pub ecc_level: Option<EccLevel>,
 }
 
 impl Default for CreateOptions {
@@ -43,6 +45,7 @@ impl Default for CreateOptions {
             show_progress: false,
             respect_gitignore: true,
             passphrase: None,
+            ecc_level: None,
         }
     }
 }
@@ -58,6 +61,7 @@ pub struct CreateStats {
     pub unique_blocks: u64,
     pub dedup_savings: u64,
     pub archive_size: u64,
+    pub parity_blocks: u64,
 }
 
 struct ProcessedFile {
@@ -128,6 +132,37 @@ fn process_file_data(data: &[u8], codec: u8, level: i32) -> Result<Vec<Compresse
             })
         })
         .collect()
+}
+
+/// Write parity blocks for a completed ECC group.
+fn flush_ecc_group(
+    group: &EccGroup,
+    level: &EccLevel,
+    writer: &mut impl Write,
+    mut offset: u64,
+    block_hashes: &mut Vec<Hash>,
+    stats: &mut CreateStats,
+) -> Result<u64> {
+    let parity_shards = erasure::encode_parity(group, level)?;
+
+    for parity_data in &parity_shards {
+        let parity_hash: Hash = blake3::hash(parity_data).into();
+        let block_header = BlockHeader::new_parity(
+            parity_hash,
+            parity_data.len() as u32,
+            group.shard_size as u32,
+            level.parity_shards as u8,
+        );
+
+        block_header.write_to(writer)?;
+        writer.write_all(parity_data)?;
+
+        offset += BLOCK_HEADER_SIZE as u64 + parity_data.len() as u64;
+        block_hashes.push(parity_hash);
+        stats.parity_blocks += 1;
+    }
+
+    Ok(offset)
 }
 
 /// Create an archive from the given source paths.
@@ -210,7 +245,10 @@ pub fn create_archive(
     });
     let encrypted = encryption.is_some();
 
-    let flags = if encrypted { FLAG_ENCRYPTED } else { 0 };
+    let mut flags = if encrypted { FLAG_ENCRYPTED } else { 0 };
+    if opts.ecc_level.is_some() {
+        flags |= FLAG_ERASURE_CODED;
+    }
     let header = ArchiveHeader::new(flags);
     let mut header_bytes = Vec::with_capacity(ARCHIVE_HEADER_SIZE);
     header.write_to(&mut header_bytes)?;
@@ -238,7 +276,11 @@ pub fn create_archive(
         unique_blocks: 0,
         dedup_savings: 0,
         archive_size: 0,
+        parity_blocks: 0,
     };
+
+    // ECC group buffer
+    let mut ecc_group = opts.ecc_level.as_ref().map(|_| EccGroup::new());
 
     for result in processed {
         let mut pf = result?;
@@ -317,9 +359,42 @@ pub fn create_archive(
                     .fetch_add(write_data.len() as u64, Ordering::Relaxed);
                 p.inc_compressed(chunk.uncompressed_size as u64);
             }
+
+            // Buffer shard for ECC group
+            if let (Some(group), Some(level)) =
+                (&mut ecc_group, &opts.ecc_level)
+            {
+                group.add_shard(write_data);
+
+                if group.len() >= level.data_shards {
+                    current_offset = flush_ecc_group(
+                        group,
+                        level,
+                        &mut writer,
+                        current_offset,
+                        &mut block_hashes,
+                        &mut stats,
+                    )?;
+                    *group = EccGroup::new();
+                }
+            }
         }
 
         entries.push(pf.entry);
+    }
+
+    // Flush any remaining partial ECC group
+    if let (Some(group), Some(level)) = (&mut ecc_group, &opts.ecc_level) {
+        if !group.is_empty() {
+            current_offset = flush_ecc_group(
+                group,
+                level,
+                &mut writer,
+                current_offset,
+                &mut block_hashes,
+                &mut stats,
+            )?;
+        }
     }
 
     if let Some(ref p) = progress {

@@ -165,6 +165,7 @@ pub fn convert_to_tg(
         show_progress: !quiet,
         respect_gitignore: false, // Don't skip files from tar archives
         passphrase: None,
+        ecc_level: None,
     };
 
     crate::archive::create_archive(tg_path, &[tmp.path()], &opts)
