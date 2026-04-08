@@ -922,7 +922,10 @@ fn cli_ecc_repair_corrupted_block() {
         .args(["verify", archive.to_str().unwrap()])
         .output()
         .unwrap();
-    assert!(!output.status.success(), "verify should fail on corrupted archive");
+    assert!(
+        !output.status.success(),
+        "verify should fail on corrupted archive"
+    );
     let stdout = String::from_utf8_lossy(&output.stdout);
     assert!(
         stdout.contains("corrupted") || stdout.contains("CORRUPTED"),
