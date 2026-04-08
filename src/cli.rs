@@ -53,6 +53,18 @@ pub enum Command {
         /// Encrypt the archive (prompts for passphrase)
         #[arg(long, short)]
         encrypt: bool,
+
+        /// Append to an existing archive (temporal mode)
+        #[arg(long)]
+        append: bool,
+
+        /// Create incremental archive against a base
+        #[arg(long, value_name = "BASE")]
+        incremental: Option<PathBuf>,
+
+        /// Reed-Solomon erasure coding level: low, medium, high
+        #[arg(long, value_name = "LEVEL")]
+        ecc: Option<String>,
     },
 
     /// Extract an archive
@@ -68,6 +80,14 @@ pub enum Command {
         /// Decrypt the archive (prompts for passphrase)
         #[arg(long, short)]
         encrypt: bool,
+
+        /// Base archive for incremental extraction
+        #[arg(long, value_name = "BASE")]
+        base: Option<PathBuf>,
+
+        /// Extract a specific generation (temporal archives)
+        #[arg(long, value_name = "N")]
+        generation: Option<u64>,
     },
 
     /// List archive contents
@@ -91,5 +111,62 @@ pub enum Command {
     Verify {
         /// Archive file to verify
         archive: PathBuf,
+    },
+
+    /// List temporal archive generations
+    Log {
+        /// Archive file to inspect
+        archive: PathBuf,
+    },
+
+    /// Merge two archives into one
+    Merge {
+        /// First archive
+        a: PathBuf,
+
+        /// Second archive
+        b: PathBuf,
+
+        /// Output archive
+        #[arg(short, long, required = true)]
+        output: PathBuf,
+    },
+
+    /// Split an archive into volumes
+    Split {
+        /// Archive file to split
+        archive: PathBuf,
+
+        /// Maximum volume size (e.g., 4G, 100M, 500K)
+        #[arg(long, required = true)]
+        size: String,
+    },
+
+    /// Join split volumes back into a single archive
+    Join {
+        /// Volume files in order
+        #[arg(required = true)]
+        volumes: Vec<PathBuf>,
+
+        /// Output archive
+        #[arg(short, long, required = true)]
+        output: PathBuf,
+    },
+
+    /// Convert a tar/tar.gz/tar.zst archive to .tg format
+    Convert {
+        /// Legacy archive to convert
+        input: PathBuf,
+
+        /// Output .tg archive
+        output: PathBuf,
+
+        /// Compression algorithm: zstd (default), lz4, none
+        #[arg(long, default_value = "zstd")]
+        compress: String,
+
+        /// Compression level (1-19 for zstd, default 9)
+        #[arg(long, short, default_value = "9")]
+        level: i32,
     },
 }
