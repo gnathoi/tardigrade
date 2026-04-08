@@ -58,8 +58,8 @@ fn scan_groups_from(
     let mut groups = Vec::new();
     let mut current_data: Vec<u64> = Vec::new();
     let mut current_parity: Vec<u64> = Vec::new();
-    let mut current_shard_size: usize = 0;
-    let mut current_parity_count: usize = 0;
+    let mut current_shard_size: usize;
+    let mut current_parity_count: usize;
     let mut offset = start_offset;
 
     while offset < end_offset {

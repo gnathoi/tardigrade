@@ -637,12 +637,20 @@ fn cmd_info(archive: &Path) -> error::Result<()> {
     if header.is_erasure_coded() {
         if let Ok(groups) = repair::scan_ecc_groups(archive) {
             let parity_count: usize = groups.iter().map(|g| g.parity_block_offsets.len()).sum();
-            let data_per_group = groups.first().map(|g| g.data_block_offsets.len()).unwrap_or(0);
-            let parity_per_group = groups.first().map(|g| g.parity_block_offsets.len()).unwrap_or(0);
-            println!(
-                "  ECC:           RS({},{}) {} groups, {} parity blocks",
-                data_per_group, parity_per_group, groups.len(), parity_count
-            );
+            if let Some(first) = groups.first() {
+                let level = erasure::EccLevel {
+                    data_shards: first.data_block_offsets.len().max(10),
+                    parity_shards: first.parity_block_offsets.len(),
+                };
+                println!(
+                    "  ECC:           {} RS({},{}) {} groups, {} parity blocks",
+                    level.name(),
+                    level.data_shards,
+                    level.total_shards() - level.data_shards,
+                    groups.len(),
+                    parity_count
+                );
+            }
         }
     }
 
