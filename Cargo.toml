@@ -1,6 +1,6 @@
 [package]
 name = "tardigrade"
-version = "0.3.0"
+version = "0.4.0"
 edition = "2024"
 description = "Modern archive tool — tar for 2026"
 license = "Apache-2.0"
@@ -74,6 +74,16 @@ reed-solomon-erasure = "6"
 
 # Temp dirs (used by convert command)
 tempfile = "3.27.0"
+
+# Self-update
+ureq = "3"
+self-replace = "1"
+serde_json = "1"
+
+[package.metadata.binstall]
+pkg-url = "{ repo }/releases/download/v{ version }/tdg-{ target }.tar.gz"
+bin-dir = "tdg"
+pkg-fmt = "tgz"
 
 [profile.release]
 lto = true
