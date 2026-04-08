@@ -56,6 +56,18 @@ pub enum Error {
 
     #[error("feature not yet implemented: {0}")]
     NotImplemented(String),
+
+    #[error("volume error: {0}")]
+    VolumeError(String),
+
+    #[error("merge conflict: {0}")]
+    MergeConflict(String),
+
+    #[error("ECC error: {0}")]
+    EccError(String),
+
+    #[error("no snapshots found in archive")]
+    NoSnapshots,
 }
 
 pub type Result<T> = std::result::Result<T, Error>;
