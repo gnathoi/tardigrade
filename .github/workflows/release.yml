@@ -78,6 +78,12 @@ jobs:
           path: artifacts
           merge-multiple: true
 
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+
+      - name: Install b3sum
+        run: cargo install b3sum
+
       - name: Generate checksums
         run: |
           cd artifacts
