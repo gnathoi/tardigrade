@@ -2,6 +2,20 @@
 
 All notable changes to tardigrade will be documented in this file.
 
+## [0.4.0] - 2026-04-08
+
+### Added
+- `tdg update` command: self-update via GitHub releases with BLAKE3 checksum verification and atomic binary replacement (via `self_replace`)
+- `tdg update --check`: check for updates without installing (always exits 0)
+- One-line install script (`install.sh`): `curl -fsSL .../install.sh | sh` with OS/arch detection, checksum verification, and PATH setup
+- SHA256SUMS and B3SUMS checksums generated in the release workflow
+- Dogfood step in release CI: tardigrade archives its own release artifacts as `tardigrade-dist.tg`
+- `cargo-binstall` metadata in Cargo.toml for binary installs via `cargo binstall tardigrade`
+- Claude Code skill updated with `tdg update` reference, install workflow, and `--decrypt` flag
+
+### Changed
+- `--encrypt` flag on `tdg extract` renamed to `--decrypt` (old name kept as alias for backward compatibility)
+
 ## [0.3.0] - 2026-04-08
 
 ### Added

@@ -51,8 +51,15 @@ tar is 45 years old. No checksums, no dedup, no seekability, single-threaded com
 - **Archive merging** — `tdg merge a.tg b.tg` with automatic cross-archive dedup
 - **Volume splitting** — `tdg split --size 4G` and `tdg join` for transport limits
 - **tar.zst compatibility** — `tdg extract` auto-detects tar/tar.gz/tar.zst, `tdg convert` migrates to .tg
+- **Self-update** — `tdg update` checks GitHub releases and updates in-place with checksum verification
 
 ## Install
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/gnathoi/tardigrade/main/install.sh | sh
+```
+
+Or via Cargo:
 
 ```bash
 cargo install tardigrade
@@ -81,7 +88,7 @@ tdg verify backup.tg
 
 # Encrypted archive
 tdg create --encrypt secret.tg ./private-data
-tdg extract --encrypt secret.tg -o ./decrypted
+tdg extract --decrypt secret.tg -o ./decrypted
 
 # Fast mode (lz4, lower compression, maximum speed)
 tdg create --compress lz4 fast.tg ./data
@@ -125,6 +132,10 @@ tdg convert legacy.tar.zst output.tg
 tdg create --ecc low archive.tg ./data        # RS(10,2) ~20% overhead
 tdg create --ecc medium archive.tg ./data     # RS(10,4) ~40% overhead
 tdg create --ecc high archive.tg ./data       # RS(10,6) ~60% overhead
+
+# Self-update
+tdg update                                    # update to latest release
+tdg update --check                            # check without installing
 ```
 
 ## Example Output
@@ -255,7 +266,20 @@ CLI (clap)
   +-- merge.rs        content-addressed archive merging
   +-- split.rs        volume splitting + reassembly
   +-- compat.rs       tar/tar.gz/tar.zst read + conversion
+  +-- update.rs       self-update via GitHub releases
 ```
+
+## Claude Code Skill
+
+tardigrade ships with a [Claude Code](https://claude.ai/code) skill that teaches Claude the full CLI, format, and common workflows. To use it, add tardigrade as a skill dependency:
+
+```bash
+# In your project's .claude/settings.json or ~/.claude/settings.json
+# Add to the skills array:
+# "skills": ["path/to/tardigrade/tardigrade-skill"]
+```
+
+Once installed, Claude will automatically suggest `tdg` commands when you're archiving, backing up, compressing, or working with `.tg` files.
 
 ## License
 
