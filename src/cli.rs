@@ -159,6 +159,20 @@ pub enum Command {
         archive: PathBuf,
     },
 
+    /// Diff between temporal generations
+    Diff {
+        /// Archive file
+        archive: PathBuf,
+
+        /// First generation number
+        #[arg(long)]
+        from: u64,
+
+        /// Second generation number
+        #[arg(long)]
+        to: u64,
+    },
+
     /// Update tdg to the latest release
     Update {
         /// Only check for updates, don't install

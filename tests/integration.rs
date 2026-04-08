@@ -33,7 +33,7 @@ fn create_test_dir(dir: &Path) {
 fn cli_version() {
     let output = tdg().arg("--version").output().unwrap();
     let stdout = String::from_utf8_lossy(&output.stdout);
-    assert!(stdout.contains("0.4.1"), "version: {stdout}");
+    assert!(stdout.contains("0.5.0"), "version: {stdout}");
 }
 
 #[test]
@@ -1159,6 +1159,77 @@ fn cli_merge_nonexistent() {
         .output()
         .unwrap();
     assert!(!output.status.success());
+}
+
+// ─── Diff between generations ─────────────────────────────────────────────
+
+#[test]
+fn cli_diff_workflow() {
+    let tmp = TempDir::new().unwrap();
+    let src = tmp.path().join("src");
+    fs::create_dir_all(&src).unwrap();
+    fs::write(src.join("stable.txt"), "stable content").unwrap();
+    fs::write(src.join("modify.txt"), "version 1").unwrap();
+    fs::write(src.join("remove.txt"), "will be removed").unwrap();
+
+    let archive = tmp.path().join("diff.tg");
+    tdg()
+        .args([
+            "create",
+            archive.to_str().unwrap(),
+            src.to_str().unwrap(),
+            "-q",
+        ])
+        .output()
+        .unwrap();
+
+    // Modify for gen 1
+    fs::write(src.join("modify.txt"), "version 2 longer content").unwrap();
+    fs::write(src.join("added.txt"), "new file in gen 1").unwrap();
+    fs::remove_file(src.join("remove.txt")).unwrap();
+
+    let output = tdg()
+        .args([
+            "create",
+            "--append",
+            archive.to_str().unwrap(),
+            src.to_str().unwrap(),
+            "-q",
+        ])
+        .output()
+        .unwrap();
+    assert!(output.status.success());
+
+    // Run diff
+    let output = tdg()
+        .args([
+            "diff",
+            archive.to_str().unwrap(),
+            "--from",
+            "0",
+            "--to",
+            "1",
+        ])
+        .output()
+        .unwrap();
+    assert!(
+        output.status.success(),
+        "diff failed: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    assert!(
+        stdout.contains("added"),
+        "should show added files: {stdout}"
+    );
+    assert!(
+        stdout.contains("modified") || stdout.contains("~"),
+        "should show modified: {stdout}"
+    );
+    assert!(
+        stdout.contains("removed") || stdout.contains("-"),
+        "should show removed: {stdout}"
+    );
 }
 
 #[test]

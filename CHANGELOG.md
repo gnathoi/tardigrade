@@ -2,6 +2,12 @@
 
 All notable changes to tardigrade will be documented in this file.
 
+## [0.5.0] - 2026-04-08
+
+### Added
+- `tdg diff --from N --to M` command: compare two temporal generations, showing added, removed, and modified files with sizes. Compares content by BLAKE3 block hashes (no block data read needed).
+- Claude Code skill updated with `tdg diff` reference
+
 ## [0.4.1] - 2026-04-08
 
 ### Changed
