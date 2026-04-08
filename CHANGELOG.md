@@ -2,6 +2,11 @@
 
 All notable changes to tardigrade will be documented in this file.
 
+## [0.4.1] - 2026-04-08
+
+### Changed
+- README rewritten: removed AI slop, grouped features by category, tightened copy, removed stale What's Next section (issues tracked in GitHub), added Release badge
+
 ## [0.4.0] - 2026-04-08
 
 ### Added
