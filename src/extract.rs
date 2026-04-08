@@ -5,24 +5,35 @@ use std::path::Path;
 
 use crate::compress;
 use crate::encrypt::{self, KeyEncapsulation, SymmetricKey};
+use crate::erasure;
 use crate::error::{Error, Result};
 use crate::format::*;
 use crate::index::deserialize_index;
 use crate::metadata::{restore_metadata, validate_extraction_path};
 
+use std::path::PathBuf;
 use std::sync::Arc;
 
 /// Get a block from cache or read it. Returns Arc to avoid cloning.
+/// If reading fails and the archive is erasure-coded, attempts ECC reconstruction.
 fn get_block(
     reader: &mut (impl Read + Seek),
     cache: &mut HashMap<u64, Arc<Vec<u8>>>,
     offset: u64,
     key: Option<&SymmetricKey>,
+    ecc_archive_path: Option<&Path>,
 ) -> Result<Arc<Vec<u8>>> {
     if let Some(cached) = cache.get(&offset) {
         return Ok(Arc::clone(cached));
     }
-    let (_, data) = read_block(reader, offset, key)?;
+    let data = match read_block(reader, offset, key) {
+        Ok((_, data)) => data,
+        Err(Error::ChecksumMismatch { .. }) if ecc_archive_path.is_some() => {
+            let (_, data) = reconstruct_block_via_ecc(reader, ecc_archive_path.unwrap(), offset)?;
+            data
+        }
+        Err(e) => return Err(e),
+    };
     let arc = Arc::new(data);
     cache.insert(offset, Arc::clone(&arc));
     Ok(arc)
@@ -88,6 +99,80 @@ fn read_block(
     Ok((header, data))
 }
 
+/// Attempt to reconstruct a corrupted block using ECC parity data.
+fn reconstruct_block_via_ecc(
+    reader: &mut (impl Read + Seek),
+    archive_path: &Path,
+    offset: u64,
+) -> Result<(BlockHeader, Vec<u8>)> {
+    let groups = crate::repair::scan_ecc_groups(archive_path)?;
+
+    // Find the group containing this block
+    let group = groups
+        .iter()
+        .find(|g| g.data_block_offsets.contains(&offset))
+        .ok_or_else(|| Error::Ecc("corrupted block not in any ECC group".into()))?;
+
+    let block_idx = group
+        .data_block_offsets
+        .iter()
+        .position(|&o| o == offset)
+        .unwrap();
+
+    let level = erasure::EccLevel {
+        data_shards: 10,
+        parity_shards: group.parity_block_offsets.len(),
+    };
+
+    // Read all shards
+    let mut shards: Vec<Option<Vec<u8>>> = Vec::new();
+
+    for &off in &group.data_block_offsets {
+        if off == offset {
+            shards.push(None); // the corrupted one
+        } else {
+            reader.seek(SeekFrom::Start(off))?;
+            let hdr = BlockHeader::read_from(reader)?;
+            let mut raw = vec![0u8; hdr.compressed_size as usize];
+            reader.read_exact(&mut raw)?;
+            raw.resize(group.shard_size, 0);
+            shards.push(Some(raw));
+        }
+    }
+
+    // Pad to full data_shards
+    while shards.len() < level.data_shards {
+        shards.push(Some(vec![0u8; group.shard_size]));
+    }
+
+    // Read parity shards
+    for &off in &group.parity_block_offsets {
+        reader.seek(SeekFrom::Start(off))?;
+        let hdr = BlockHeader::read_from(reader)?;
+        let mut raw = vec![0u8; hdr.compressed_size as usize];
+        reader.read_exact(&mut raw)?;
+        raw.resize(group.shard_size, 0);
+        shards.push(Some(raw));
+    }
+
+    erasure::reconstruct_shards(&mut shards, &level)?;
+
+    // Get the original header for metadata
+    reader.seek(SeekFrom::Start(offset))?;
+    let header = BlockHeader::read_from(reader)?;
+    let reconstructed = shards[block_idx].take().unwrap();
+    let compressed = &reconstructed[..header.compressed_size as usize];
+    let data = compress::decompress(compressed, header.codec, header.uncompressed_size as usize)?;
+
+    // Verify the reconstructed data
+    let actual_hash: Hash = blake3::hash(&data).into();
+    if actual_hash != header.hash {
+        return Err(Error::Ecc("ECC reconstruction produced wrong hash".into()));
+    }
+
+    Ok((header, data))
+}
+
 /// Extract an archive to a destination directory.
 pub fn extract_archive(archive_path: &Path, dest: &Path) -> Result<ExtractStats> {
     extract_archive_inner(archive_path, dest, None)
@@ -138,6 +223,14 @@ fn extract_archive_inner(
     // Cache for decompressed blocks — uses Arc to avoid cloning large buffers
     let mut block_cache: HashMap<u64, std::sync::Arc<Vec<u8>>> = HashMap::new();
 
+    // ECC recovery path (only for erasure-coded, non-encrypted archives)
+    let ecc_path: Option<PathBuf> = if header.is_erasure_coded() && !header.is_encrypted() {
+        Some(archive_path.to_path_buf())
+    } else {
+        None
+    };
+    let ecc_ref = ecc_path.as_deref();
+
     // First pass: create all directories
     for entry in &entries {
         if entry.file_type == FileType::Directory {
@@ -165,6 +258,7 @@ fn extract_archive_inner(
                         &mut block_cache,
                         block_ref.offset,
                         key.as_ref(),
+                        ecc_ref,
                     )?;
 
                     let start = block_ref.slice_start as usize;
@@ -189,6 +283,7 @@ fn extract_archive_inner(
                             &mut block_cache,
                             block_ref.offset,
                             key.as_ref(),
+                            ecc_ref,
                         )?;
 
                         let start = block_ref.slice_start as usize;

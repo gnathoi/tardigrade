@@ -16,6 +16,7 @@ mod index;
 mod merge;
 mod metadata;
 mod progress;
+mod repair;
 mod split;
 mod temporal;
 mod verify;
@@ -95,6 +96,7 @@ fn main() {
         Command::List { archive, long } => cmd_list(&archive, long),
         Command::Info { archive } => cmd_info(&archive),
         Command::Verify { archive } => cmd_verify(&archive, cli.quiet),
+        Command::Repair { archive } => cmd_repair(&archive, cli.quiet),
         Command::Log { archive } => cmd_log(&archive),
         Command::Merge { a, b, output } => cmd_merge(&a, &b, &output, cli.quiet),
         Command::Split { archive, size } => cmd_split(&archive, &size, cli.quiet),
@@ -163,6 +165,7 @@ fn cmd_create(
         show_progress: !quiet,
         respect_gitignore: !no_ignore,
         passphrase,
+        ecc_level,
     };
 
     let source_refs: Vec<&std::path::Path> = paths.iter().map(|p| p.as_path()).collect();
@@ -237,9 +240,10 @@ fn cmd_create(
             println!(
                 "  {}",
                 style(format!(
-                    "ecc: RS({},{}) ~{:.0}% overhead",
+                    "ecc: RS({},{}) {} parity blocks ~{:.0}% overhead",
                     level.data_shards,
                     level.parity_shards,
+                    stats.parity_blocks,
                     level.overhead_percent()
                 ))
                 .dim(),
@@ -276,6 +280,7 @@ fn cmd_append(
         show_progress: !quiet,
         respect_gitignore: !no_ignore,
         passphrase: None,
+        ecc_level: None,
     };
 
     let source_refs: Vec<&std::path::Path> = paths.iter().map(|p| p.as_path()).collect();
@@ -334,6 +339,7 @@ fn cmd_create_incremental(
         show_progress: !quiet,
         respect_gitignore: !no_ignore,
         passphrase: None,
+        ecc_level: None,
     };
 
     let source_refs: Vec<&std::path::Path> = paths.iter().map(|p| p.as_path()).collect();
@@ -627,6 +633,27 @@ fn cmd_info(archive: &Path) -> error::Result<()> {
     println!("  Flags:         {}", flags.join(", "));
     println!("  Root hash:     {}", hex::encode(&footer.root_hash[..8]));
 
+    // Show ECC details for erasure-coded archives
+    if header.is_erasure_coded()
+        && let Ok(groups) = repair::scan_ecc_groups(archive)
+    {
+        let parity_count: usize = groups.iter().map(|g| g.parity_block_offsets.len()).sum();
+        if let Some(first) = groups.first() {
+            let level = erasure::EccLevel {
+                data_shards: first.data_block_offsets.len().max(10),
+                parity_shards: first.parity_block_offsets.len(),
+            };
+            println!(
+                "  ECC:           {} RS({},{}) {} groups, {} parity blocks",
+                level.name(),
+                level.data_shards,
+                level.total_shards() - level.data_shards,
+                groups.len(),
+                parity_count
+            );
+        }
+    }
+
     // Show generation count for temporal archives
     if header.is_append_only()
         && let Ok(snapshots) = temporal::list_snapshots(archive)
@@ -710,12 +737,90 @@ fn cmd_verify(archive: &Path, quiet: bool) -> error::Result<()> {
             }
         }
 
+        if report.ecc_groups > 0 {
+            println!(
+                "  ecc: {} groups, {} parity blocks",
+                report.ecc_groups, report.ecc_parity_blocks,
+            );
+            if report.ecc_recoverable > 0 {
+                println!(
+                    "  {} {}",
+                    style(format!(
+                        "{} corrupted blocks recoverable via ECC",
+                        report.ecc_recoverable
+                    ))
+                    .green()
+                    .bold(),
+                    style("(run tdg repair to fix)").dim(),
+                );
+            }
+        }
+
         if report.blocks_corrupted == 0 {
             println!();
         }
     }
 
     if report.blocks_corrupted > 0 {
+        std::process::exit(1);
+    }
+
+    Ok(())
+}
+
+fn cmd_repair(archive: &Path, quiet: bool) -> error::Result<()> {
+    let start = Instant::now();
+    let report = repair::repair_archive(archive)?;
+    let elapsed = start.elapsed();
+
+    if !quiet {
+        println!();
+        if report.unrecoverable == 0 && report.corrupted == 0 {
+            println!(
+                "  {} {}",
+                style("no damage found").green().bold(),
+                style(archive.display()).white().bold(),
+            );
+        } else if report.unrecoverable == 0 {
+            println!(
+                "  {} {}",
+                style("repaired").green().bold(),
+                style(archive.display()).white().bold(),
+            );
+        } else {
+            println!(
+                "  {} {}",
+                style("REPAIR INCOMPLETE").red().bold(),
+                style(archive.display()).white().bold(),
+            );
+        }
+        println!();
+        println!(
+            "  {} blocks scanned, {} corrupted, {} recovered, {} unrecoverable",
+            report.scanned,
+            if report.corrupted > 0 {
+                style(report.corrupted).red().bold().to_string()
+            } else {
+                style(0u64).green().to_string()
+            },
+            if report.recovered > 0 {
+                style(report.recovered).green().bold().to_string()
+            } else {
+                "0".to_string()
+            },
+            if report.unrecoverable > 0 {
+                style(report.unrecoverable).red().bold().to_string()
+            } else {
+                "0".to_string()
+            },
+        );
+        println!(
+            "  {}",
+            style(format!("{:.2}s", elapsed.as_secs_f64())).dim()
+        );
+    }
+
+    if report.unrecoverable > 0 {
         std::process::exit(1);
     }
 

@@ -1,0 +1,202 @@
+# tardigrade — modern archive tool
+
+You know how to use `tdg`, the tardigrade CLI. tardigrade is a modern replacement for tar: content-addressed dedup, parallel compression, Reed-Solomon error correction, encryption, temporal archives, and a block-based `.tg` format with BLAKE3 checksums.
+
+## When to activate
+
+Use tardigrade when the user:
+- Mentions archiving, backing up, compressing, or bundling files
+- Works with tar/tar.gz/tar.zst files (tardigrade can read and convert them)
+- Wants to save or restore project state
+- Asks about file integrity, checksums, or data recovery
+- Needs to split large files for transfer
+- Mentions `tdg`, `tardigrade`, or `.tg` files
+
+## CLI reference
+
+### `tdg create` (alias: `c`)
+
+Create a `.tg` archive.
+
+```bash
+tdg create archive.tg ./src ./docs         # archive multiple paths
+tdg create -l 3 fast.tg .                  # lower compression (faster)
+tdg create --compress lz4 fast.tg .        # lz4 instead of zstd
+tdg create --compress none raw.tg .        # no compression
+tdg create --encrypt secret.tg .           # encrypt (prompts for passphrase)
+tdg create --ecc low safe.tg .             # Reed-Solomon error correction
+tdg create --ecc medium safe.tg .          # more parity (recovers up to 4/10 blocks)
+tdg create --ecc high safe.tg .            # maximum parity (recovers up to 6/10 blocks)
+tdg create --no-ignore archive.tg .        # include .gitignored files
+```
+
+Flags:
+- `--compress <zstd|lz4|none>` — compression algorithm (default: zstd)
+- `-l, --level <1-19>` — compression level (default: 9)
+- `-e, --encrypt` — encrypt with passphrase (disables dedup for privacy)
+- `--ecc <low|medium|high>` — Reed-Solomon erasure coding
+  - `low`: RS(10,2) ~20% overhead, recovers 2 lost blocks per group
+  - `medium`: RS(10,4) ~40% overhead, recovers 4 lost blocks per group
+  - `high`: RS(10,6) ~60% overhead, recovers 6 lost blocks per group
+- `--no-ignore` — don't respect .gitignore
+- `--append` — append to existing archive (temporal mode)
+- `--incremental <BASE>` — create differential archive against a base
+
+### `tdg extract` (alias: `x`)
+
+Extract an archive. Auto-detects tar/tar.gz/tar.zst and handles them too.
+
+```bash
+tdg extract archive.tg                     # extract to current directory
+tdg extract archive.tg -o ./dest           # extract to specific directory
+tdg extract --encrypt secret.tg -o ./dest  # decrypt and extract
+tdg extract --generation 0 temporal.tg -o ./v1  # extract specific generation
+tdg extract --base base.tg diff.tg -o ./out     # extract incremental
+```
+
+### `tdg list` (alias: `ls`)
+
+```bash
+tdg list archive.tg                        # list file paths
+tdg list -l archive.tg                     # detailed: permissions, sizes
+```
+
+### `tdg info`
+
+```bash
+tdg info archive.tg                        # format version, sizes, flags, block count
+```
+
+Shows: format version, sizes, compression ratio, file/dir counts, block count, flags (encrypted, erasure-coded, append-only, incremental), ECC details, generation count.
+
+### `tdg verify`
+
+```bash
+tdg verify archive.tg                      # check every block's BLAKE3 hash
+```
+
+Verifies header, footer, index, and every block. Reports corruption with damage maps and affected files. For ECC archives, reports whether corrupted blocks are recoverable.
+
+### `tdg repair`
+
+```bash
+tdg repair archive.tg                      # reconstruct corrupted blocks using ECC parity
+```
+
+Only works on archives created with `--ecc`. Scans all blocks, finds corruption, reconstructs using Reed-Solomon parity data, and writes repaired data back in place.
+
+### `tdg log`
+
+```bash
+tdg log temporal.tg                        # list generations with file/dir counts
+```
+
+### `tdg merge`
+
+```bash
+tdg merge a.tg b.tg -o combined.tg        # merge with content-addressed dedup
+```
+
+Combines two archives. Duplicate blocks are deduplicated. Path conflicts resolved by newer mtime.
+
+### `tdg split` / `tdg join`
+
+```bash
+tdg split archive.tg --size 4G            # split into 4GB volumes
+tdg join archive.001.tg archive.002.tg -o restored.tg  # reassemble
+```
+
+### `tdg convert`
+
+```bash
+tdg convert old.tar.gz modern.tg           # convert tar/tar.gz/tar.zst to .tg
+tdg convert old.tar.zst modern.tg --compress lz4  # convert with different compression
+```
+
+### Global flags
+
+- `-j, --threads <N>` — number of threads (default: all cores)
+- `-q, --quiet` — suppress output
+- `-v, --verbose` — verbose output
+
+## The .tg format
+
+Block-based binary format:
+
+```
+[ArchiveHeader 16B] [Block0..BlockN] [ECC parity blocks] [Index] [Redundant Index] [Footer 76B]
+```
+
+- **Content-addressed**: blocks identified by BLAKE3 hash, automatic dedup
+- **Block headers**: 48 bytes each with hash, sizes, codec, CRC32
+- **Index**: msgpack-serialized file entries, zstd-compressed
+- **Footer**: offsets, block count, Merkle root, temporal chain pointer
+- **Flags**: encrypted, erasure-coded, append-only, incremental
+- **ECC**: parity blocks interleaved after every 10 data blocks
+
+## Common workflows
+
+### Back up before risky changes
+
+```bash
+tdg create backup-pre-refactor.tg .
+# ... do the risky work ...
+# If things go wrong:
+tdg extract backup-pre-refactor.tg -o ./rollback
+```
+
+### Ongoing project backup (temporal)
+
+```bash
+tdg create project.tg .                   # initial snapshot
+# ... work for a while ...
+tdg create --append project.tg .          # add new generation
+tdg log project.tg                        # see all generations
+tdg extract --generation 0 project.tg -o ./old  # restore any point
+```
+
+### Backup with maximum safety
+
+```bash
+tdg create --ecc medium backup.tg .       # error correction included
+# Later, if storage degrades:
+tdg verify backup.tg                      # check integrity
+tdg repair backup.tg                      # fix corrupted blocks
+```
+
+### Incremental backups (bandwidth-limited)
+
+```bash
+tdg create base.tg .                      # full backup
+# ... changes happen ...
+tdg create --incremental base.tg diff.tg .  # only new/changed blocks
+tdg extract --base base.tg diff.tg -o ./restored
+```
+
+### Share large archives
+
+```bash
+tdg create project.tg .
+tdg split project.tg --size 4G            # fit on USB sticks
+# On the other side:
+tdg join project.001.tg project.002.tg -o project.tg
+```
+
+### Migrate from tar
+
+```bash
+tdg convert legacy.tar.gz modern.tg       # get dedup + checksums
+tdg extract legacy.tar.gz -o ./dest       # or just extract directly
+```
+
+### Combine team archives
+
+```bash
+tdg merge alice.tg bob.tg -o team.tg      # content-addressed dedup across both
+```
+
+### CI artifact archiving
+
+```bash
+tdg create --compress lz4 -l 1 artifacts.tg ./build/output  # fast compression for CI
+```

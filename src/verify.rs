@@ -18,6 +18,9 @@ pub struct VerifyReport {
     pub index_ok: bool,
     pub corrupted_blocks: Vec<CorruptedBlock>,
     pub affected_files: Vec<String>,
+    pub ecc_groups: u64,
+    pub ecc_parity_blocks: u64,
+    pub ecc_recoverable: u64,
 }
 
 #[derive(Debug)]
@@ -44,17 +47,23 @@ pub fn verify_full(archive_path: &Path) -> Result<VerifyReport> {
         index_ok: false,
         corrupted_blocks: vec![],
         affected_files: vec![],
+        ecc_groups: 0,
+        ecc_parity_blocks: 0,
+        ecc_recoverable: 0,
     };
 
     // Check header
-    match ArchiveHeader::read_from(&mut reader) {
-        Ok(_) => report.header_ok = true,
+    let header = match ArchiveHeader::read_from(&mut reader) {
+        Ok(h) => {
+            report.header_ok = true;
+            h
+        }
         Err(e) => {
             return Err(Error::InvalidArchive(format!(
                 "header verification failed: {e}"
             )));
         }
-    }
+    };
 
     // Check footer
     let footer = match read_footer(&mut reader) {
@@ -114,6 +123,37 @@ pub fn verify_full(archive_path: &Path) -> Result<VerifyReport> {
                 }
             }
         }
+    }
+
+    // Check ECC recoverability for corrupted blocks
+    if header.is_erasure_coded() && !corrupted_offsets.is_empty() {
+        if let Ok(groups) = crate::repair::scan_ecc_groups(archive_path) {
+            report.ecc_groups = groups.len() as u64;
+            report.ecc_parity_blocks = groups
+                .iter()
+                .map(|g| g.parity_block_offsets.len() as u64)
+                .sum();
+
+            for group in &groups {
+                let corrupted_in_group = group
+                    .data_block_offsets
+                    .iter()
+                    .filter(|off| corrupted_offsets.contains(off))
+                    .count();
+                if corrupted_in_group > 0 && corrupted_in_group <= group.parity_block_offsets.len()
+                {
+                    report.ecc_recoverable += corrupted_in_group as u64;
+                }
+            }
+        }
+    } else if header.is_erasure_coded()
+        && let Ok(groups) = crate::repair::scan_ecc_groups(archive_path)
+    {
+        report.ecc_groups = groups.len() as u64;
+        report.ecc_parity_blocks = groups
+            .iter()
+            .map(|g| g.parity_block_offsets.len() as u64)
+            .sum();
     }
 
     Ok(report)
