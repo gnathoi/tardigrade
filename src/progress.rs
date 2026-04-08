@@ -112,4 +112,3 @@ impl CreateProgress {
         self.status_bar.finish_and_clear();
     }
 }
-

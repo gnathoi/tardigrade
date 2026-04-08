@@ -1,4 +1,3 @@
-
 mod archive;
 mod chunk;
 mod cli;
@@ -114,6 +113,7 @@ fn main() {
     }
 }
 
+#[allow(clippy::too_many_arguments)]
 fn cmd_create(
     archive: &Path,
     paths: &[PathBuf],
@@ -130,7 +130,7 @@ fn cmd_create(
     let ecc_level = if let Some(ref ecc_str) = ecc {
         Some(
             erasure::EccLevel::from_str(ecc_str)
-                .ok_or_else(|| error::Error::EccError(format!("unknown ECC level: {ecc_str}")))?,
+                .ok_or_else(|| error::Error::Ecc(format!("unknown ECC level: {ecc_str}")))?,
         )
     } else {
         None
@@ -628,10 +628,10 @@ fn cmd_info(archive: &Path) -> error::Result<()> {
     println!("  Root hash:     {}", hex::encode(&footer.root_hash[..8]));
 
     // Show generation count for temporal archives
-    if header.is_append_only() {
-        if let Ok(snapshots) = temporal::list_snapshots(archive) {
-            println!("  Generations:   {}", snapshots.len());
-        }
+    if header.is_append_only()
+        && let Ok(snapshots) = temporal::list_snapshots(archive)
+    {
+        println!("  Generations:   {}", snapshots.len());
     }
 
     Ok(())
@@ -800,7 +800,7 @@ fn cmd_merge(a: &Path, b: &Path, output: &Path, quiet: bool) -> error::Result<()
 
 fn cmd_split(archive: &Path, size_str: &str, quiet: bool) -> error::Result<()> {
     let max_size = split::parse_size(size_str)
-        .map_err(|e| error::Error::VolumeError(format!("invalid size: {e}")))?;
+        .map_err(|e| error::Error::Volume(format!("invalid size: {e}")))?;
 
     let start = Instant::now();
     let volumes = split::split_archive(archive, max_size)?;

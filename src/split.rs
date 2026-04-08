@@ -19,9 +19,7 @@ use crate::format::*;
 /// Returns the paths of the created volumes.
 pub fn split_archive(archive_path: &Path, max_size: u64) -> Result<Vec<PathBuf>> {
     if max_size < 1024 {
-        return Err(Error::VolumeError(
-            "volume size must be at least 1 KB".into(),
-        ));
+        return Err(Error::Volume("volume size must be at least 1 KB".into()));
     }
 
     let file = File::open(archive_path).map_err(|e| Error::io_path(archive_path, e))?;
@@ -33,9 +31,7 @@ pub fn split_archive(archive_path: &Path, max_size: u64) -> Result<Vec<PathBuf>>
 
     // If archive fits in one volume, just copy it
     if file_size <= max_size {
-        return Err(Error::VolumeError(
-            "archive already fits in one volume".into(),
-        ));
+        return Err(Error::Volume("archive already fits in one volume".into()));
     }
 
     // Read and validate header
@@ -124,7 +120,7 @@ pub fn split_archive(archive_path: &Path, max_size: u64) -> Result<Vec<PathBuf>>
 /// Volumes must be provided in order.
 pub fn join_volumes(volume_paths: &[PathBuf], output_path: &Path) -> Result<()> {
     if volume_paths.is_empty() {
-        return Err(Error::VolumeError("no volumes provided".into()));
+        return Err(Error::Volume("no volumes provided".into()));
     }
 
     let out_file = File::create(output_path).map_err(|e| Error::io_path(output_path, e))?;
@@ -133,7 +129,7 @@ pub fn join_volumes(volume_paths: &[PathBuf], output_path: &Path) -> Result<()> 
     for vol_path in volume_paths {
         let file = File::open(vol_path).map_err(|e| Error::io_path(vol_path, e))?;
         let mut reader = BufReader::new(file);
-        std::io::copy(&mut reader, &mut writer).map_err(|e| Error::io_path(vol_path, e.into()))?;
+        std::io::copy(&mut reader, &mut writer).map_err(|e| Error::io_path(vol_path, e))?;
     }
 
     writer.flush()?;
@@ -152,7 +148,7 @@ fn copy_bytes(reader: &mut impl Read, writer: &mut impl Write, mut count: u64) -
     while count > 0 {
         let to_read = std::cmp::min(count, buf.len() as u64) as usize;
         reader.read_exact(&mut buf[..to_read])?;
-        writer.write_all(&mut buf[..to_read])?;
+        writer.write_all(&buf[..to_read])?;
         count -= to_read as u64;
     }
     Ok(())

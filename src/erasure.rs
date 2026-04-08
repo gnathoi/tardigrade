@@ -134,10 +134,10 @@ pub fn encode_parity(group: &EccGroup, level: &EccLevel) -> Result<Vec<Vec<u8>>>
     }
 
     let rs = ReedSolomon::new(level.data_shards, level.parity_shards)
-        .map_err(|e| Error::EccError(format!("failed to create RS encoder: {e}")))?;
+        .map_err(|e| Error::Ecc(format!("failed to create RS encoder: {e}")))?;
 
     rs.encode(&mut shards)
-        .map_err(|e| Error::EccError(format!("RS encode failed: {e}")))?;
+        .map_err(|e| Error::Ecc(format!("RS encode failed: {e}")))?;
 
     // Return only the parity shards
     let parity: Vec<Vec<u8>> = shards[level.data_shards..].to_vec();
@@ -148,12 +148,12 @@ pub fn encode_parity(group: &EccGroup, level: &EccLevel) -> Result<Vec<Vec<u8>>>
 /// `shards` has length `data_shards + parity_shards`.
 /// Entries that are `None` are missing and will be reconstructed.
 #[allow(dead_code)]
-pub fn reconstruct_shards(shards: &mut Vec<Option<Vec<u8>>>, level: &EccLevel) -> Result<()> {
+pub fn reconstruct_shards(shards: &mut [Option<Vec<u8>>], level: &EccLevel) -> Result<()> {
     let rs = ReedSolomon::new(level.data_shards, level.parity_shards)
-        .map_err(|e| Error::EccError(format!("failed to create RS decoder: {e}")))?;
+        .map_err(|e| Error::Ecc(format!("failed to create RS decoder: {e}")))?;
 
     rs.reconstruct(shards)
-        .map_err(|e| Error::EccError(format!("RS reconstruct failed: {e}")))?;
+        .map_err(|e| Error::Ecc(format!("RS reconstruct failed: {e}")))?;
 
     Ok(())
 }

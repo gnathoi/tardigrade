@@ -51,11 +51,11 @@ pub enum Error {
     #[error("archive is encrypted — use --encrypt to provide passphrase or --identity <keyfile>")]
     EncryptedArchive,
 
-    #[error("volume error: {0}")]
-    VolumeError(String),
+    #[error("volume: {0}")]
+    Volume(String),
 
-    #[error("ECC error: {0}")]
-    EccError(String),
+    #[error("ecc: {0}")]
+    Ecc(String),
 
     #[error("no snapshots found in archive")]
     NoSnapshots,
