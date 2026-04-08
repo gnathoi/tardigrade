@@ -22,36 +22,45 @@
 
 # tardigrade
 
-Modern archiving for modern systems. tar, but for 2026.
+Archive tool. Fast, checksummed, deduplicated.
 
-`11x faster` than tar+zstd on source code | `78% smaller` archives with dedup | `2 GB/s` throughput
+`11x faster` than tar+zstd on source code | `78% smaller` with dedup | `2 GB/s` throughput
 
 [![CI](https://github.com/gnathoi/tardigrade/actions/workflows/ci.yml/badge.svg)](https://github.com/gnathoi/tardigrade/actions/workflows/ci.yml)
+[![Release](https://github.com/gnathoi/tardigrade/actions/workflows/release.yml/badge.svg)](https://github.com/gnathoi/tardigrade/actions/workflows/release.yml)
 
 ---
 
 ## Why
 
-tar is 45 years old. No checksums, no dedup, no seekability, single-threaded compression, and a mess of incompatible extensions. tardigrade is what you'd build if you started from scratch today.
+tar is 45 years old. No checksums, no dedup, no seekability, single-threaded compression, and a mess of incompatible extensions. tardigrade is what you'd build if you started over.
 
 ## Features
 
-- **11x faster** — parallel zstd/lz4 compression via rayon, saturates all cores
-- **Content-addressed dedup** — identical blocks stored once. Archive 3 copies of `node_modules` and pay for 1
-- **BLAKE3 integrity** — every block checksummed and verified on read
-- **Encrypted** — ChaCha20-Poly1305 AEAD with passphrase key wrapping
-- **Beautiful CLI** — progress bars, throughput, compression ratios, dedup savings
-- **.gitignore-aware** — automatically skips `target/`, `node_modules/`, `.git/`
-- **Content-defined chunking** — FastCDC dedup works across modified files, not just identical ones
-- **Detailed verification** — `tdg verify` checks every block with damage mapping
-- **Cross-platform** — Linux, macOS, Windows
+**Speed**
+- **11x faster** — parallel zstd/lz4 via rayon, uses all cores
+- **.gitignore-aware** — skips `target/`, `node_modules/`, `.git/` automatically
+
+**Dedup & compression**
+- **Content-addressed dedup** — identical blocks stored once. 3 copies of `node_modules`, pay for 1
+- **Content-defined chunking** — FastCDC splits at content boundaries, dedup works across modified files
+
+**Integrity & recovery**
+- **BLAKE3 checksums** — every block verified on read
 - **Reed-Solomon ECC** — `--ecc low|medium|high` erasure coding for data recovery
-- **Temporal archives** — `--append` turns a .tg file into a portable Time Machine with `tdg log`
-- **Incremental archives** — `--incremental base.tg` stores only new/changed blocks
-- **Archive merging** — `tdg merge a.tg b.tg` with automatic cross-archive dedup
-- **Volume splitting** — `tdg split --size 4G` and `tdg join` for transport limits
-- **tar.zst compatibility** — `tdg extract` auto-detects tar/tar.gz/tar.zst, `tdg convert` migrates to .tg
-- **Self-update** — `tdg update` checks GitHub releases and updates in-place with checksum verification
+- **`tdg verify`** — full integrity check with damage mapping
+- **`tdg repair`** — reconstruct corrupted blocks from ECC parity
+
+**Encryption**
+- **ChaCha20-Poly1305 AEAD** with passphrase key wrapping
+
+**Archive operations**
+- **Temporal archives** — `--append` for point-in-time snapshots, `tdg log` to browse
+- **Incremental** — `--incremental base.tg` stores only changed blocks
+- **Merge** — `tdg merge a.tg b.tg` with cross-archive dedup
+- **Split/join** — `tdg split --size 4G` for transport limits
+- **tar compatibility** — `tdg extract` reads tar/tar.gz/tar.zst, `tdg convert` migrates to .tg
+- **Self-update** — `tdg update` with checksum verification
 
 ## Install
 
@@ -65,7 +74,7 @@ Or via Cargo:
 cargo install tardigrade
 ```
 
-Or download a pre-built binary from [Releases](https://github.com/gnathoi/tardigrade/releases).
+Or grab a binary from [Releases](https://github.com/gnathoi/tardigrade/releases).
 
 ## Usage
 
@@ -172,7 +181,7 @@ $ tdg extract backup.tg -o ./restored
 
 ## Benchmarks
 
-Run locally with `bash bench/run-all.sh` before shipping. Results below from Apple Silicon (M-series, 10 cores, 3 runs averaged).
+Apple Silicon (M-series, 10 cores). Run locally: `bash bench/run-all.sh`
 
 ### Speed
 
@@ -184,7 +193,7 @@ Run locally with `bash bench/run-all.sh` before shipping. Results below from App
 
 ### Key Results
 
-Apple Silicon, best of 5 runs, process time only:
+Best of 5 runs, process time only:
 
 | Dataset | tdg create | tar+zstd | Speedup | tdg extract | tar+zstd | Speedup | Size savings |
 |---------|-----------|----------|---------|-------------|----------|---------|-------------|
@@ -192,23 +201,17 @@ Apple Silicon, best of 5 runs, process time only:
 | Heavy dedup (13 MB, shared deps) | 9ms | 89ms | **9.9x** | 28ms | 93ms | **3.3x** | **78% smaller** |
 | Large mixed (94 MB, logs+bins) | 31ms | 35ms | **1.1x** | 39ms | 72ms | **1.8x** | **29% smaller** |
 
-**Where tardigrade wins big:** Source code, projects with shared dependencies, anything with duplicate content. Parallel compression + dedup + skipping FastCDC for small files makes tardigrade 10x faster for typical developer workloads.
+tardigrade wins big on source code, projects with shared dependencies, anything with duplicate content. Parallel compression + dedup + skipping FastCDC for small files = 10x faster for typical developer workloads.
 
-**Where it's equal:** Large unique binary data. Both tools are I/O bound at that point.
-
-Run benchmarks yourself: `bash bench/run-all.sh`
+Large unique binary data is roughly equal. Both tools are I/O bound.
 
 ### Core Scaling
 
-tardigrade uses rayon for parallel compression and hashing. More cores = more throughput, up to the I/O and serial bottleneck. Measured on Apple Silicon, extrapolated using Amdahl's law:
-
 ![Core Scaling](bench/bench-scaling.svg)
 
-At 10 cores: ~2 GB/s. Predicted at 32 cores: ~2.2 GB/s. The serial fraction (~34%) is the single-threaded dedup lookup + sequential write pass.
+10 cores: ~2 GB/s. 32 cores (projected): ~2.2 GB/s. The serial fraction (~34%) is the dedup lookup + sequential write pass.
 
 ## Archive Format (.tg)
-
-The `.tg` format is designed from scratch for modern use:
 
 ```
 [ArchiveHeader 16B] [KeyEncap?] [Block0] [Block1] ... [BlockN] [Index] [RedundantIndex] [Footer 76B]
@@ -219,27 +222,14 @@ The `.tg` format is designed from scratch for modern use:
 - **Index**: msgpack-encoded file tree, zstd compressed, stored twice for redundancy
 - **Footer**: index offsets, block count, Merkle root hash, prev-footer pointer
 
-Content-defined chunking (FastCDC, 64KB-1MB target 256KB) splits files at content boundaries. Blocks are content-addressed by BLAKE3 hash. Identical blocks across files are stored once.
+Files are split at content boundaries (FastCDC, 64KB-1MB, target 256KB). Blocks are content-addressed by BLAKE3 hash. Identical blocks stored once.
 
 ### Encryption
 
-When `--encrypt` is used:
 - Archive key: random 256-bit symmetric key
 - Block encryption: ChaCha20-Poly1305 AEAD, nonce derived from content hash
 - Key wrapping: passphrase -> BLAKE3 KDF -> wrapping key -> encrypted archive key
-- Dedup automatically disabled (prevents hash-based content inference)
-
-## What's Next
-
-- [x] Reed-Solomon erasure coding (`--ecc low|medium|high`)
-- [x] Temporal/append-only archives (`tdg log`, `--append`, `--generation N`)
-- [x] Incremental archives (`--incremental base.tg`)
-- [x] Archive merging (`tdg merge a.tg b.tg`)
-- [x] Volume splitting (`tdg split --size 4G`, `tdg join`)
-- [x] tar.zst read compatibility (`tdg extract`, `tdg convert`)
-- [ ] FUSE mounting (`tdg mount archive.tg /mnt`)
-- [ ] `tdg repair` — reconstruct corrupted blocks using ECC parity
-- [ ] `tdg diff archive.tg@1 archive.tg@3` — diff between temporal generations
+- Dedup disabled when encrypted (prevents hash-based content inference)
 
 ## Architecture
 
@@ -271,15 +261,7 @@ CLI (clap)
 
 ## Claude Code Skill
 
-tardigrade ships with a [Claude Code](https://claude.ai/code) skill that teaches Claude the full CLI, format, and common workflows. To use it, add tardigrade as a skill dependency:
-
-```bash
-# In your project's .claude/settings.json or ~/.claude/settings.json
-# Add to the skills array:
-# "skills": ["path/to/tardigrade/tardigrade-skill"]
-```
-
-Once installed, Claude will automatically suggest `tdg` commands when you're archiving, backing up, compressing, or working with `.tg` files.
+tardigrade includes a [Claude Code](https://claude.ai/code) skill at `tardigrade-skill/SKILL.md`. Add it to your Claude Code settings and Claude will use `tdg` commands when archiving, backing up, or working with `.tg` files.
 
 ## License
 
