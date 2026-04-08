@@ -140,21 +140,20 @@ pub fn verify_full(archive_path: &Path) -> Result<VerifyReport> {
                     .iter()
                     .filter(|off| corrupted_offsets.contains(off))
                     .count();
-                if corrupted_in_group > 0
-                    && corrupted_in_group <= group.parity_block_offsets.len()
+                if corrupted_in_group > 0 && corrupted_in_group <= group.parity_block_offsets.len()
                 {
                     report.ecc_recoverable += corrupted_in_group as u64;
                 }
             }
         }
-    } else if header.is_erasure_coded() {
-        if let Ok(groups) = crate::repair::scan_ecc_groups(archive_path) {
-            report.ecc_groups = groups.len() as u64;
-            report.ecc_parity_blocks = groups
-                .iter()
-                .map(|g| g.parity_block_offsets.len() as u64)
-                .sum();
-        }
+    } else if header.is_erasure_coded()
+        && let Ok(groups) = crate::repair::scan_ecc_groups(archive_path)
+    {
+        report.ecc_groups = groups.len() as u64;
+        report.ecc_parity_blocks = groups
+            .iter()
+            .map(|g| g.parity_block_offsets.len() as u64)
+            .sum();
     }
 
     Ok(report)

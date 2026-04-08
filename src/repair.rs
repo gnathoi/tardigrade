@@ -94,10 +94,7 @@ fn scan_groups_from(
 }
 
 /// Read the raw compressed data from a block (no decompression or hash check).
-fn read_raw_block(
-    reader: &mut (impl Read + Seek),
-    offset: u64,
-) -> Result<(BlockHeader, Vec<u8>)> {
+fn read_raw_block(reader: &mut (impl Read + Seek), offset: u64) -> Result<(BlockHeader, Vec<u8>)> {
     reader.seek(SeekFrom::Start(offset))?;
     let header = BlockHeader::read_from(reader)?;
     let mut data = vec![0u8; header.compressed_size as usize];
@@ -106,10 +103,7 @@ fn read_raw_block(
 }
 
 /// Verify a single block's BLAKE3 hash. Returns Ok(()) if valid.
-fn verify_block_hash(
-    reader: &mut (impl Read + Seek),
-    offset: u64,
-) -> std::result::Result<(), u64> {
+fn verify_block_hash(reader: &mut (impl Read + Seek), offset: u64) -> std::result::Result<(), u64> {
     let (header, raw) = read_raw_block(reader, offset).map_err(|_| offset)?;
 
     if header.is_parity() {
@@ -131,9 +125,9 @@ fn verify_block_hash(
 
 /// A pending repair: offset in the archive + reconstructed compressed data.
 struct PendingRepair {
-    offset: u64,         // block offset in archive
+    offset: u64,          // block offset in archive
     compressed_size: u32, // original compressed_size from header
-    data: Vec<u8>,       // reconstructed shard (padded)
+    data: Vec<u8>,        // reconstructed shard (padded)
 }
 
 /// Repair an archive by reconstructing corrupted blocks using ECC parity.
@@ -302,9 +296,7 @@ pub fn repair_archive(archive_path: &Path) -> Result<RepairReport> {
             .map_err(|e| Error::io_path(archive_path, e))?;
 
         for repair in &repairs {
-            write_file.seek(SeekFrom::Start(
-                repair.offset + BLOCK_HEADER_SIZE as u64,
-            ))?;
+            write_file.seek(SeekFrom::Start(repair.offset + BLOCK_HEADER_SIZE as u64))?;
             write_file.write_all(&repair.data[..repair.compressed_size as usize])?;
         }
 

@@ -361,9 +361,7 @@ pub fn create_archive(
             }
 
             // Buffer shard for ECC group
-            if let (Some(group), Some(level)) =
-                (&mut ecc_group, &opts.ecc_level)
-            {
+            if let (Some(group), Some(level)) = (&mut ecc_group, &opts.ecc_level) {
                 group.add_shard(write_data);
 
                 if group.len() >= level.data_shards {
@@ -384,17 +382,17 @@ pub fn create_archive(
     }
 
     // Flush any remaining partial ECC group
-    if let (Some(group), Some(level)) = (&mut ecc_group, &opts.ecc_level) {
-        if !group.is_empty() {
-            current_offset = flush_ecc_group(
-                group,
-                level,
-                &mut writer,
-                current_offset,
-                &mut block_hashes,
-                &mut stats,
-            )?;
-        }
+    if let (Some(group), Some(level)) = (&mut ecc_group, &opts.ecc_level)
+        && !group.is_empty()
+    {
+        current_offset = flush_ecc_group(
+            group,
+            level,
+            &mut writer,
+            current_offset,
+            &mut block_hashes,
+            &mut stats,
+        )?;
     }
 
     if let Some(ref p) = progress {

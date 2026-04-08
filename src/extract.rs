@@ -29,8 +29,7 @@ fn get_block(
     let data = match read_block(reader, offset, key) {
         Ok((_, data)) => data,
         Err(Error::ChecksumMismatch { .. }) if ecc_archive_path.is_some() => {
-            let (_, data) =
-                reconstruct_block_via_ecc(reader, ecc_archive_path.unwrap(), offset)?;
+            let (_, data) = reconstruct_block_via_ecc(reader, ecc_archive_path.unwrap(), offset)?;
             data
         }
         Err(e) => return Err(e),
