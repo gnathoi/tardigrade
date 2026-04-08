@@ -10,6 +10,7 @@ Use tardigrade when the user:
 - Wants to save or restore project state
 - Asks about file integrity, checksums, or data recovery
 - Needs to split large files for transfer
+- Wants to install or update tdg
 - Mentions `tdg`, `tardigrade`, or `.tg` files
 
 ## CLI reference
@@ -49,7 +50,7 @@ Extract an archive. Auto-detects tar/tar.gz/tar.zst and handles them too.
 ```bash
 tdg extract archive.tg                     # extract to current directory
 tdg extract archive.tg -o ./dest           # extract to specific directory
-tdg extract --encrypt secret.tg -o ./dest  # decrypt and extract
+tdg extract --decrypt secret.tg -o ./dest   # decrypt and extract
 tdg extract --generation 0 temporal.tg -o ./v1  # extract specific generation
 tdg extract --base base.tg diff.tg -o ./out     # extract incremental
 ```
@@ -112,6 +113,15 @@ tdg join archive.001.tg archive.002.tg -o restored.tg  # reassemble
 tdg convert old.tar.gz modern.tg           # convert tar/tar.gz/tar.zst to .tg
 tdg convert old.tar.zst modern.tg --compress lz4  # convert with different compression
 ```
+
+### `tdg update`
+
+```bash
+tdg update                                 # update to latest release
+tdg update --check                         # check for updates without installing
+```
+
+Self-update via GitHub releases. Downloads the correct platform binary, verifies BLAKE3 checksum, and atomically replaces the current binary. Always exits 0 (`--check` prints status, doesn't use exit code to signal update availability).
 
 ### Global flags
 
@@ -199,4 +209,14 @@ tdg merge alice.tg bob.tg -o team.tg      # content-addressed dedup across both
 
 ```bash
 tdg create --compress lz4 -l 1 artifacts.tg ./build/output  # fast compression for CI
+```
+
+### Install and update
+
+```bash
+# One-line install (macOS/Linux)
+curl -fsSL https://raw.githubusercontent.com/gnathoi/tardigrade/main/install.sh | sh
+
+# Update an existing install
+tdg update
 ```

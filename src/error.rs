@@ -59,6 +59,9 @@ pub enum Error {
 
     #[error("no snapshots found in archive")]
     NoSnapshots,
+
+    #[error("update: {0}")]
+    Update(String),
 }
 
 pub type Result<T> = std::result::Result<T, Error>;

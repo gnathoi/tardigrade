@@ -19,6 +19,7 @@ mod progress;
 mod repair;
 mod split;
 mod temporal;
+mod update;
 mod verify;
 
 use std::path::{Path, PathBuf};
@@ -80,7 +81,7 @@ fn main() {
         Command::Extract {
             archive,
             output,
-            encrypt,
+            decrypt,
             base,
             generation,
         } => {
@@ -90,7 +91,7 @@ fn main() {
             } else if let Some(g) = generation {
                 cmd_extract_generation(&archive, g, &dest, cli.quiet)
             } else {
-                cmd_extract(&archive, &dest, encrypt, cli.quiet)
+                cmd_extract(&archive, &dest, decrypt, cli.quiet)
             }
         }
         Command::List { archive, long } => cmd_list(&archive, long),
@@ -101,6 +102,7 @@ fn main() {
         Command::Merge { a, b, output } => cmd_merge(&a, &b, &output, cli.quiet),
         Command::Split { archive, size } => cmd_split(&archive, &size, cli.quiet),
         Command::Join { volumes, output } => cmd_join(&volumes, &output, cli.quiet),
+        Command::Update { check } => cmd_update(check, cli.quiet),
         Command::Convert {
             input,
             output,
@@ -962,6 +964,14 @@ fn cmd_join(volumes: &[PathBuf], output: &Path, quiet: bool) -> error::Result<()
     }
 
     Ok(())
+}
+
+fn cmd_update(check: bool, quiet: bool) -> error::Result<()> {
+    if check {
+        update::check_update(quiet)
+    } else {
+        update::do_update(quiet)
+    }
 }
 
 fn cmd_convert(

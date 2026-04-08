@@ -78,8 +78,8 @@ pub enum Command {
         output: Option<PathBuf>,
 
         /// Decrypt the archive (prompts for passphrase)
-        #[arg(long, short)]
-        encrypt: bool,
+        #[arg(long, short, alias = "encrypt")]
+        decrypt: bool,
 
         /// Base archive for incremental extraction
         #[arg(long, value_name = "BASE")]
@@ -157,6 +157,13 @@ pub enum Command {
     Repair {
         /// Archive file to repair
         archive: PathBuf,
+    },
+
+    /// Update tdg to the latest release
+    Update {
+        /// Only check for updates, don't install
+        #[arg(long)]
+        check: bool,
     },
 
     /// Convert a tar/tar.gz/tar.zst archive to .tg format
