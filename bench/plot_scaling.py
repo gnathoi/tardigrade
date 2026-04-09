@@ -51,21 +51,21 @@ def load_csv(path):
     return threads, times, throughputs
 
 def amdahl_fit(threads, throughputs):
-    """Least-squares fit of Amdahl's law: tp(n) = t1 / (s + (1-s)/n)."""
+    """Least-squares fit of Amdahl's law + overhead: tp(n) = t1 / (s + (1-s)/n + c*n).
+    The c*n term models per-thread overhead (contention, cache pressure)."""
     threads_a = np.array(threads, dtype=float)
     tp_a = np.array(throughputs, dtype=float)
 
-    def model(n, t1, s):
-        return t1 / (s + (1 - s) / n)
+    def model(n, t1, s, c):
+        return t1 / (s + (1 - s) / n + c * n)
 
-    # Initial guess: t1 from single-thread, s from first/last ratio
     t1_init = tp_a[0]
     ratio = t1_init / tp_a[-1]
     s_init = max(0.05, (ratio - 1.0/threads_a[-1]) / (1.0 - 1.0/threads_a[-1]))
 
-    popt, _ = curve_fit(model, threads_a, tp_a, p0=[t1_init, s_init],
-                        bounds=([0, 0.001], [np.inf, 0.999]))
-    return popt[1], popt[0]  # s, t1
+    popt, _ = curve_fit(model, threads_a, tp_a, p0=[t1_init, s_init, 1e-4],
+                        bounds=([0, 0.001, 0], [np.inf, 0.999, 1.0]))
+    return popt[1], popt[0], popt[2]  # s, t1, c
 
 def setup_ax(ax):
     ax.set_facecolor(PANEL)
@@ -76,12 +76,12 @@ def setup_ax(ax):
 
 def plot(csv_path, output_dir):
     threads, times, throughputs = load_csv(csv_path)
-    s, t1 = amdahl_fit(threads, throughputs)
+    s, t1, c = amdahl_fit(threads, throughputs)
     max_measured = max(threads)
 
     # Fit curve over measured range only
     fit_threads = np.linspace(1, max_measured, 200)
-    fit_tp = [t1 / (s + (1-s)/n) for n in fit_threads]
+    fit_tp = [t1 / (s + (1-s)/n + c*n) for n in fit_threads]
 
     fig, (ax1, ax2) = plt.subplots(1, 2, figsize=(12, 4.2))
     fig.patch.set_facecolor(BG)
@@ -92,7 +92,7 @@ def plot(csv_path, output_dir):
     ax1.plot(linear_threads, [t1*n for n in linear_threads], '--',
              color=LINEAR, linewidth=1, label='linear')
     ax1.plot(fit_threads, fit_tp, '-', color=EXTRAP, linewidth=1.5, alpha=0.6,
-             label=f"amdahl fit (serial={s:.0%})")
+             label=f"amdahl+overhead (s={s:.0%})")
     ax1.scatter(threads, throughputs, color=TDG, s=30, zorder=5,
                 edgecolors=PANEL, linewidths=1.5, label='measured')
 
@@ -108,7 +108,7 @@ def plot(csv_path, output_dir):
     fit_speedup = [tp / t1 for tp in fit_tp]
 
     ax2.plot(linear_threads, linear_threads, '--', color=LINEAR, linewidth=1, label='linear')
-    ax2.plot(fit_threads, fit_speedup, '-', color=EXTRAP, linewidth=1.5, alpha=0.6, label='amdahl fit')
+    ax2.plot(fit_threads, fit_speedup, '-', color=EXTRAP, linewidth=1.5, alpha=0.6, label='amdahl+overhead')
     ax2.scatter(threads, measured_speedup, color=TDG, s=30, zorder=5,
                 edgecolors=PANEL, linewidths=1.5, label='measured')
 
@@ -134,7 +134,9 @@ def plot(csv_path, output_dir):
     plt.close(fig)
 
     print(f"Scaling plot saved to {output_dir}/bench-scaling.svg")
-    print(f"Serial fraction: {s:.1%}, predicted {t1/(s+(1-s)/32):.0f} MB/s @ 32 cores")
+    peak_n = int(fit_threads[np.argmax(fit_tp)])
+    peak_tp = max(fit_tp)
+    print(f"Serial fraction: {s:.1%}, overhead: {c:.2e}/thread, peak {peak_tp:.0f} MB/s @ {peak_n} threads")
 
 if __name__ == '__main__':
     csv_path = sys.argv[1] if len(sys.argv) > 1 else 'bench/scaling.csv'
