@@ -173,6 +173,89 @@ fn reconstruct_block_via_ecc(
     Ok((header, data))
 }
 
+/// Read a single file from the archive and return its contents.
+pub fn cat_file(
+    archive_path: &Path,
+    file_path: &str,
+    passphrase: Option<&[u8]>,
+) -> Result<Vec<u8>> {
+    let file = File::open(archive_path).map_err(|e| Error::io_path(archive_path, e))?;
+    let mut reader = BufReader::new(file);
+
+    let header = ArchiveHeader::read_from(&mut reader)?;
+
+    let key: Option<encrypt::SymmetricKey> = if header.is_encrypted() {
+        let pass = passphrase.ok_or(Error::EncryptedArchive)?;
+        let encap = KeyEncapsulation::read_from(&mut reader)?;
+        Some(encap.unwrap_with_passphrase(pass)?)
+    } else {
+        None
+    };
+
+    let footer = read_footer(&mut reader)?;
+    let entries = read_index(&mut reader, &footer)?;
+
+    // Find the entry matching the requested path.
+    // Normalize separators: archives may store paths with \ on Windows.
+    let normalized = file_path
+        .trim_start_matches('/')
+        .trim_start_matches('\\')
+        .replace('\\', "/");
+    let entry = entries
+        .iter()
+        .find(|e| {
+            let p = e.path_display().replace('\\', "/");
+            let p = p.trim_start_matches('/');
+            p == normalized
+        })
+        .ok_or_else(|| Error::InvalidArchive(format!("file not found in archive: {file_path}")))?;
+
+    if !matches!(entry.file_type, FileType::File) {
+        return Err(Error::InvalidArchive(format!(
+            "{file_path} is not a regular file"
+        )));
+    }
+
+    let ecc_path: Option<PathBuf> = if header.is_erasure_coded() && !header.is_encrypted() {
+        Some(archive_path.to_path_buf())
+    } else {
+        None
+    };
+    let ecc_ref = ecc_path.as_deref();
+
+    let mut block_cache: HashMap<u64, Arc<Vec<u8>>> = HashMap::new();
+
+    if entry.block_refs.len() == 1 {
+        let bref = &entry.block_refs[0];
+        let block_data = get_block(
+            &mut reader,
+            &mut block_cache,
+            bref.offset,
+            key.as_ref(),
+            ecc_ref,
+        )?;
+        Ok(block_data
+            [bref.slice_start as usize..bref.slice_start as usize + bref.slice_len as usize]
+            .to_vec())
+    } else {
+        let mut file_data = Vec::with_capacity(entry.size as usize);
+        for bref in &entry.block_refs {
+            let block_data = get_block(
+                &mut reader,
+                &mut block_cache,
+                bref.offset,
+                key.as_ref(),
+                ecc_ref,
+            )?;
+            file_data.extend_from_slice(
+                &block_data[bref.slice_start as usize
+                    ..bref.slice_start as usize + bref.slice_len as usize],
+            );
+        }
+        Ok(file_data)
+    }
+}
+
 /// Extract an archive to a destination directory.
 pub fn extract_archive(archive_path: &Path, dest: &Path) -> Result<ExtractStats> {
     extract_archive_inner(archive_path, dest, None)

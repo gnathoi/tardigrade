@@ -2,6 +2,11 @@
 
 All notable changes to tardigrade will be documented in this file.
 
+## [0.6.0] - 2026-04-09
+
+### Added
+- `tdg cat archive.tg path/to/file.txt` — print a single file from an archive to stdout without extracting the whole archive. Pipe-friendly, supports encrypted archives (`--decrypt`), multi-block files, and ECC recovery.
+
 ## [0.5.7] - 2026-04-09
 
 ### Changed
