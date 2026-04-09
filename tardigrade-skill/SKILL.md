@@ -56,6 +56,18 @@ tdg extract --generation 0 temporal.tg -o ./v1  # extract specific generation
 tdg extract --base base.tg diff.tg -o ./out     # extract incremental
 ```
 
+### `tdg cat`
+
+Print a single file from an archive to stdout without extracting the whole archive.
+
+```bash
+tdg cat archive.tg path/to/file.txt           # print to stdout
+tdg cat archive.tg src/main.rs | head -20     # pipe-friendly
+tdg cat --decrypt secret.tg private.key       # encrypted archives
+```
+
+Seeks directly to the file's blocks, decompresses on demand. No temp files. Supports multi-block files and ECC recovery.
+
 ### `tdg list` (alias: `ls`)
 
 ```bash
@@ -154,6 +166,13 @@ Block-based binary format:
 - **ECC**: parity blocks interleaved after every 10 data blocks
 
 ## Common workflows
+
+### Peek at a file without extracting
+
+```bash
+tdg cat backup.tg config/database.yml         # check a config
+tdg cat backup.tg Cargo.toml | grep version   # find the version
+```
 
 ### Back up before risky changes
 
