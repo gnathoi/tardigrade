@@ -2,6 +2,15 @@
 
 All notable changes to tardigrade will be documented in this file.
 
+## [0.6.1] - 2026-04-09
+
+### Fixed
+- Dedup store now capped at 2M entries (~200 MB) to prevent OOM on very large archives. Blocks beyond the cap are written normally but miss dedup opportunities. A warning is shown if overflow occurs.
+- Tar-compat extraction now propagates errors instead of silently swallowing directory creation and symlink failures.
+
+### Changed
+- Shared block utilities extracted to `src/block.rs`, removing ~160 lines of duplicated code across archive, temporal, incremental, and extract modules.
+
 ## [0.6.0] - 2026-04-09
 
 ### Added
