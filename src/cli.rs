@@ -107,6 +107,19 @@ pub enum Command {
         archive: PathBuf,
     },
 
+    /// Print a file from an archive to stdout
+    Cat {
+        /// Archive file
+        archive: PathBuf,
+
+        /// Path of the file inside the archive
+        path: String,
+
+        /// Decrypt the archive (prompts for passphrase)
+        #[arg(long, short, alias = "encrypt")]
+        decrypt: bool,
+    },
+
     /// Verify archive integrity
     Verify {
         /// Archive file to verify

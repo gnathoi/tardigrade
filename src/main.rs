@@ -108,6 +108,11 @@ fn main() {
                 cmd_extract(&archive, &dest, decrypt, cli.quiet)
             }
         }
+        Command::Cat {
+            archive,
+            path,
+            decrypt,
+        } => cmd_cat(&archive, &path, decrypt),
         Command::List { archive, long } => cmd_list(&archive, long),
         Command::Info { archive } => cmd_info(&archive),
         Command::Verify { archive } => cmd_verify(&archive, cli.quiet),
@@ -572,6 +577,25 @@ fn cmd_extract_generation(
             style(format!("{:.2}s", elapsed.as_secs_f64())).dim()
         );
     }
+
+    Ok(())
+}
+
+fn cmd_cat(archive: &Path, file_path: &str, encrypt: bool) -> error::Result<()> {
+    let passphrase = if encrypt {
+        let pass = rpassword::prompt_password("Passphrase: ")
+            .map_err(|e| error::Error::Io { source: e })?;
+        Some(pass.into_bytes())
+    } else {
+        None
+    };
+
+    let data = extract::cat_file(archive, file_path, passphrase.as_deref())?;
+
+    use std::io::Write;
+    std::io::stdout()
+        .write_all(&data)
+        .map_err(|e| error::Error::Io { source: e })?;
 
     Ok(())
 }
