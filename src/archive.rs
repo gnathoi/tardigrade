@@ -203,7 +203,12 @@ pub fn create_archive(
     }
 
     let progress = if opts.show_progress {
-        Some(CreateProgress::new(total_bytes))
+        let p = CreateProgress::new(total_bytes);
+        p.stats.bytes_scanned.store(total_bytes, Ordering::Relaxed);
+        p.stats
+            .files_scanned
+            .store(walk_entries.len() as u64, Ordering::Relaxed);
+        Some(p)
     } else {
         None
     };

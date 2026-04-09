@@ -127,7 +127,7 @@ impl CreateProgress {
     /// Update the status line with compression ratio and dedup stats.
     /// Called during the write phase as blocks are flushed to disk.
     pub fn inc_compressed(&self, _bytes: u64) {
-        let input = self.stats.bytes_scanned.load(Ordering::Relaxed);
+        let input = self.stats.bytes_processed.load(Ordering::Relaxed);
         let written = self.stats.bytes_written.load(Ordering::Relaxed);
         let dedup = self.stats.dedup_savings.load(Ordering::Relaxed);
 
