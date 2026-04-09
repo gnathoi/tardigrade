@@ -7,7 +7,7 @@ use std::path::PathBuf;
     about = "tardigrade — modern archive tool",
     version,
     long_about = "Fast, multithreaded archiving with content-addressed dedup, \
-                  checksums, and beautiful progress output."
+                  self-healing erasure coding, and beautiful progress output."
 )]
 pub struct Cli {
     #[command(subcommand)]
@@ -62,9 +62,9 @@ pub enum Command {
         #[arg(long, value_name = "BASE")]
         incremental: Option<PathBuf>,
 
-        /// Reed-Solomon erasure coding level: low, medium, high
-        #[arg(long, value_name = "LEVEL")]
-        ecc: Option<String>,
+        /// Reed-Solomon erasure coding: none, low (default), medium, high
+        #[arg(long, value_name = "LEVEL", default_value = "low")]
+        ecc: String,
     },
 
     /// Extract an archive

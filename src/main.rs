@@ -54,6 +54,11 @@ fn main() {
             incremental: incremental_base,
             ecc,
         } => {
+            let ecc = if erasure::EccLevel::is_none(&ecc) {
+                None
+            } else {
+                Some(ecc)
+            };
             if append {
                 cmd_append(&archive, &paths, &codec_name, level, no_ignore, cli.quiet)
             } else if let Some(base) = incremental_base {

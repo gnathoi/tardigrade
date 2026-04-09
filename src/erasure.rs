@@ -42,6 +42,11 @@ impl EccLevel {
         }
     }
 
+    /// Returns true if the string explicitly disables ECC.
+    pub fn is_none(s: &str) -> bool {
+        matches!(s.to_lowercase().as_str(), "none" | "off" | "false")
+    }
+
     pub fn total_shards(&self) -> usize {
         self.data_shards + self.parity_shards
     }
