@@ -1,9 +1,8 @@
 use std::sync::Arc;
-use std::sync::atomic::{AtomicU64, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::time::{Duration, Instant};
 
 use console::style;
-use humansize::{BINARY, format_size};
 use indicatif::{MultiProgress, ProgressBar, ProgressStyle};
 
 pub struct ProgressStats {
@@ -28,6 +27,8 @@ impl ProgressStats {
     }
 }
 
+const PULSE_FRAMES: &[&str] = &["⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏"];
+
 /// Progress display for archive creation
 pub struct CreateProgress {
     _multi: MultiProgress,
@@ -36,6 +37,8 @@ pub struct CreateProgress {
     pub stats: Arc<ProgressStats>,
     start: Instant,
     total_bytes: u64,
+    finishing: Arc<AtomicBool>,
+    pulse_idx: AtomicU64,
 }
 
 impl CreateProgress {
@@ -43,10 +46,9 @@ impl CreateProgress {
         let multi = MultiProgress::new();
         let stats = ProgressStats::new();
 
-        // Main progress bar — uses a custom template without indicatif's ETA
-        // (we compute our own stable linear ETA instead)
+        // Main progress bar — no throughput (shown in final summary instead)
         let main_style = ProgressStyle::with_template(
-            "  {bar:40.green/dark_gray} {percent:>3}%  {binary_bytes_per_sec:>12}  {elapsed_precise}  {msg}",
+            "  {bar:40.green/dark_gray} {percent:>3}%  {elapsed_precise}  {msg}",
         )
         .unwrap()
         .progress_chars("━━╸");
@@ -55,7 +57,7 @@ impl CreateProgress {
         main_bar.set_style(main_style);
         main_bar.enable_steady_tick(Duration::from_millis(80));
 
-        // Status line below — shows live compression stats
+        // Status line below
         let status_style = ProgressStyle::with_template("  {msg}").unwrap();
 
         let status_bar = multi.add(ProgressBar::new_spinner());
@@ -69,11 +71,17 @@ impl CreateProgress {
             stats,
             start: Instant::now(),
             total_bytes,
+            finishing: Arc::new(AtomicBool::new(false)),
+            pulse_idx: AtomicU64::new(0),
         }
     }
 
+    fn pulse_char(&self) -> &'static str {
+        let idx = self.pulse_idx.fetch_add(1, Ordering::Relaxed) as usize % PULSE_FRAMES.len();
+        PULSE_FRAMES[idx]
+    }
+
     /// Called from rayon threads as each file is read + compressed.
-    /// This is where most wall-clock time is spent, so this drives the progress bar.
     pub fn inc_processed(&self, input_bytes: u64) {
         self.stats
             .bytes_processed
@@ -83,79 +91,96 @@ impl CreateProgress {
     }
 
     /// Stable linear ETA: elapsed / fraction_done * fraction_remaining.
-    /// No exponential smoothing, no wild oscillation.
     fn update_eta(&self) {
+        if self.finishing.load(Ordering::Relaxed) {
+            return;
+        }
+
         let processed = self.stats.bytes_processed.load(Ordering::Relaxed);
         if processed == 0 {
             return;
         }
         let elapsed = self.start.elapsed();
         let fraction = processed as f64 / self.total_bytes.max(1) as f64;
+
+        // Before 10%: show pulsing spinner instead of unreliable ETA
+        if fraction < 0.10 {
+            let pulse = self.pulse_char();
+            self.main_bar
+                .set_message(format!("{}", style(pulse).cyan()));
+            return;
+        }
+
         let remaining_secs = if fraction > 0.0 {
             elapsed.as_secs_f64() / fraction * (1.0 - fraction)
         } else {
             0.0
         };
 
+        // Seconds only below 1min, nearest minute otherwise
         let eta = if remaining_secs < 60.0 {
             format!("ETA {:.0}s", remaining_secs)
         } else if remaining_secs < 3600.0 {
-            format!(
-                "ETA {}m{:02}s",
-                remaining_secs as u64 / 60,
-                remaining_secs as u64 % 60
-            )
+            let mins = (remaining_secs / 60.0).round() as u64;
+            format!("ETA ~{}m", mins)
         } else {
             let h = remaining_secs as u64 / 3600;
-            let m = (remaining_secs as u64 % 3600) / 60;
-            format!("ETA {h}h{m:02}m")
+            let m = ((remaining_secs as u64 % 3600) as f64 / 60.0).round() as u64;
+            format!("ETA ~{h}h{m:02}m")
         };
         self.main_bar.set_message(eta);
     }
 
     pub fn finish_scan(&self) {
-        let files = self.stats.files_scanned.load(Ordering::Relaxed);
-        let bytes = self.stats.bytes_scanned.load(Ordering::Relaxed);
+        // no-op: scan stats no longer shown during progress
+    }
+
+    /// Update the status line with pulsing animation.
+    pub fn inc_compressed(&self, _bytes: u64) {
+        let pulse = self.pulse_char();
         self.status_bar.set_message(format!(
-            "{} {} files, {}",
-            style("○").dim(),
-            style(files).white().bold(),
-            style(format_size(bytes, BINARY)).dim(),
+            "{}  {}",
+            style(pulse).cyan(),
+            style("compressing…").dim(),
         ));
     }
 
-    /// Update the status line with compression ratio and dedup stats.
-    /// Called during the write phase as blocks are flushed to disk.
-    pub fn inc_compressed(&self, _bytes: u64) {
-        let input = self.stats.bytes_processed.load(Ordering::Relaxed);
-        let written = self.stats.bytes_written.load(Ordering::Relaxed);
-        let dedup = self.stats.dedup_savings.load(Ordering::Relaxed);
+    /// Transition to "finishing" state — replace bar + ETA with a pulsing animation
+    pub fn start_finishing(&self) {
+        self.finishing.store(true, Ordering::Relaxed);
 
-        let ratio = if written > 0 {
-            input as f64 / written as f64
-        } else {
-            0.0
-        };
+        // Switch main bar to a simple message style
+        let bar_style = ProgressStyle::with_template("  {msg}").unwrap();
+        self.main_bar.set_style(bar_style);
+        self.main_bar.set_message(format!(
+            "{}  {}",
+            style("⠋").cyan(),
+            style("finishing up…").dim()
+        ));
+        self.status_bar.set_message(String::new());
 
-        let mut parts = vec![format!(
-            "{} ratio: {}",
-            style("○").dim(),
-            style(format!("{:.1}x", ratio)).cyan().bold(),
-        )];
-
-        if dedup > 0 {
-            parts.push(format!(
-                "dedup: {}",
-                style(format!("-{}", format_size(dedup, BINARY)))
-                    .green()
-                    .bold(),
-            ));
-        }
-
-        self.status_bar.set_message(parts.join("  "));
+        // Animate the finishing spinner in a background thread
+        let bar = self.main_bar.clone();
+        let finishing = self.finishing.clone();
+        std::thread::spawn(move || {
+            let mut idx = 0usize;
+            while finishing.load(Ordering::Relaxed) {
+                let frame = PULSE_FRAMES[idx % PULSE_FRAMES.len()];
+                bar.set_message(format!(
+                    "{}  {}",
+                    style(frame).cyan(),
+                    style("finishing up…").dim()
+                ));
+                std::thread::sleep(Duration::from_millis(80));
+                idx += 1;
+            }
+        });
     }
 
     pub fn finish(&self) {
+        self.finishing.store(false, Ordering::Relaxed);
+        // Small sleep to let the spinner thread notice and exit
+        std::thread::sleep(Duration::from_millis(100));
         self.main_bar.finish_and_clear();
         self.status_bar.finish_and_clear();
     }
