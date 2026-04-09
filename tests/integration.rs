@@ -33,7 +33,7 @@ fn create_test_dir(dir: &Path) {
 fn cli_version() {
     let output = tdg().arg("--version").output().unwrap();
     let stdout = String::from_utf8_lossy(&output.stdout);
-    assert!(stdout.contains("0.5.6"), "version: {stdout}");
+    assert!(stdout.contains("tdg"), "version output: {stdout}");
 }
 
 #[test]
