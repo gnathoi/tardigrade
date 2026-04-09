@@ -24,7 +24,7 @@
 
 Archive tool. Fast, checksummed, deduplicated.
 
-`11x faster` than tar+zstd on source code | `78% smaller` with dedup | `2 GB/s` throughput
+`7x faster` than tar+zstd on source code | `78% smaller` with dedup | `1.5 GB/s` throughput
 
 [![CI](https://github.com/gnathoi/tardigrade/actions/workflows/ci.yml/badge.svg)](https://github.com/gnathoi/tardigrade/actions/workflows/ci.yml)
 [![Release](https://github.com/gnathoi/tardigrade/actions/workflows/release.yml/badge.svg)](https://github.com/gnathoi/tardigrade/actions/workflows/release.yml)
@@ -39,7 +39,7 @@ tar is 45 years old. No checksums, no dedup, no seekability, single-threaded com
 ## Features
 
 **Speed**
-- **11x faster** — parallel zstd/lz4 via rayon, uses all cores
+- **Up to 9x faster** — parallel zstd/lz4 via rayon, uses all cores
 - **.gitignore-aware** — skips `target/`, `node_modules/`, `.git/` automatically
 
 **Dedup & compression**
@@ -198,19 +198,34 @@ Best of 5 runs, process time only:
 
 | Dataset | tdg create | tar+zstd | Speedup | tdg extract | tar+zstd | Speedup | Size savings |
 |---------|-----------|----------|---------|-------------|----------|---------|-------------|
-| Source project (5 MB, 270 files) | 8ms | 91ms | **11.4x** | 34ms | 89ms | **2.6x** | ~equal |
-| Heavy dedup (13 MB, shared deps) | 9ms | 89ms | **9.9x** | 28ms | 93ms | **3.3x** | **78% smaller** |
-| Large mixed (94 MB, logs+bins) | 31ms | 35ms | **1.1x** | 39ms | 72ms | **1.8x** | **29% smaller** |
-
-tardigrade wins big on source code, projects with shared dependencies, anything with duplicate content. Parallel compression + dedup + skipping FastCDC for small files = 10x faster for typical developer workloads.
-
-Large unique binary data is roughly equal. Both tools are I/O bound.
+| Source project (5 MB, 270 files) | 14ms | 93ms | **6.6x** | 34ms | 90ms | **2.6x** | ~equal |
+| Heavy dedup (13 MB, shared deps) | 10ms | 87ms | **8.7x** | 27ms | 89ms | **3.3x** | **78% smaller** |
+| Large mixed (91 MB, logs+bins) | 41ms | 33ms | 0.8x | 39ms | 73ms | **1.9x** | **28% smaller** |
 
 ### Core Scaling
 
 ![Core Scaling](bench/bench-scaling.svg)
 
-10 cores: ~2 GB/s. 32 cores (projected): ~2.2 GB/s. The serial fraction (~34%) is the dedup lookup + sequential write pass.
+10 logical cores: ~1.5 GB/s. 32 logical cores (projected): ~1.8 GB/s. 64 logical cores (projected): ~1.9 GB/s. The serial fraction (~34%) is the dedup lookup + sequential write pass.
+
+## When tardigrade wins
+
+tardigrade isn't always the fastest or smallest. Here's where it genuinely blows other methods out of the water, and where it doesn't.
+
+**Duplicate-heavy data (the sweet spot)**
+Monorepos, node_modules, Docker layers, CI artifacts, any dataset with repeated files or shared content. tar+zstd compresses each file independently and can't deduplicate across files. tardigrade's content-addressed blocks mean identical content is stored once regardless of where it appears. On the benchmark dedup dataset: **78% smaller** and **9x faster** than tar+zstd.
+
+**Source code and project backups**
+Lots of small text files. tardigrade skips FastCDC overhead for small files and parallelizes compression across all cores. On the benchmark source project (270 files, 5 MB): **7x faster** to create, **2.6x faster** to extract.
+
+**Long-term archival (data you can't lose)**
+Reed-Solomon ECC means your archive can detect and repair bit rot, flash degradation, and transmission errors. tar and zip have zero protection. One flipped bit and your data is gone. tardigrade archives heal themselves. No other single-file archiver does this by default.
+
+**Temporal backups with dedup**
+`tdg create --append` adds a new point-in-time snapshot to an existing archive. Shared blocks across snapshots are stored once. A week of daily snapshots costs barely more than a single full backup. borg and restic do this too, but they need a repository and daemon. tardigrade gives you a single portable file.
+
+**Where tar+zstd wins**
+Large datasets with no duplicate content (random binary data, unique media files). Both tools are I/O bound and tar+zstd's simpler pipeline has less overhead. On the benchmark large mixed dataset (91 MB, mostly random binaries): tar+zstd creates slightly faster. tardigrade still wins on extraction and compression ratio due to dedup on the duplicate portions.
 
 ## Archive Format (.tg)
 
