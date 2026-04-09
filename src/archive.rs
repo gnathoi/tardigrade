@@ -52,6 +52,7 @@ pub struct CreateStats {
     pub block_count: u64,
     pub unique_blocks: u64,
     pub dedup_savings: u64,
+    pub dedup_overflow: u64,
     pub archive_size: u64,
     pub parity_blocks: u64,
 }
@@ -257,6 +258,7 @@ pub fn create_archive(
         block_count: 0,
         unique_blocks: 0,
         dedup_savings: 0,
+        dedup_overflow: 0,
         archive_size: 0,
         parity_blocks: 0,
     };
@@ -417,6 +419,7 @@ pub fn create_archive(
 
     writer.flush()?;
     stats.archive_size = current_offset;
+    stats.dedup_overflow = dedup.overflow_count();
 
     if let Some(ref p) = progress {
         p.finish();
