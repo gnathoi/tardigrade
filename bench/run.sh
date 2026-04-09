@@ -4,9 +4,12 @@
 # Timing: measures only the process, not shell overhead
 set -e
 
-TDG="${TDG:-./target/release/tdg}"
+TDG="${TDG:-tdg}"
 WORKDIR=$(mktemp -d)
 trap "rm -rf $WORKDIR" EXIT
+
+SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
+DATADIR="$SCRIPT_DIR/.data"
 
 # Time a command precisely using date +%s%N (nanoseconds) or gdate
 # Falls back to python only if needed
@@ -32,7 +35,7 @@ time_cmd() {
 create_datasets() {
     >&2 echo "Creating benchmark datasets..."
 
-    # Dataset 1: Source code project
+    # Dataset 1: Source code project (~5 MB)
     mkdir -p "$WORKDIR/source_project/src" "$WORKDIR/source_project/tests" "$WORKDIR/source_project/docs"
     for i in $(seq 1 200); do
         python3 -c "
@@ -52,7 +55,7 @@ print('\n'.join('fn test_' + str(j) + '() { assert!(true); }' for j in range(lin
         yes "Documentation content for module $i with various details." | head -500 > "$WORKDIR/source_project/docs/doc_$i.md"
     done
 
-    # Dataset 2: Heavy duplication (monorepo / node_modules sim)
+    # Dataset 2: Heavy duplication (monorepo / node_modules sim, ~13 MB)
     mkdir -p "$WORKDIR/dedup_heavy/base"
     for i in $(seq 1 40); do
         dd if=/dev/urandom bs=1024 count=50 of="$WORKDIR/dedup_heavy/base/lib_$i.bin" 2>/dev/null
@@ -64,7 +67,7 @@ print('\n'.join('fn test_' + str(j) + '() { assert!(true); }' for j in range(lin
         done
     done
 
-    # Dataset 3: Large mixed (logs + binaries + copies)
+    # Dataset 3: Large mixed (logs + binaries + copies, ~100 MB)
     mkdir -p "$WORKDIR/large_mixed"
     for i in $(seq 1 5); do
         yes "log entry $(date) level=INFO msg=\"request $i\" duration=42ms" | head -200000 > "$WORKDIR/large_mixed/log_$i.txt"
@@ -81,6 +84,53 @@ print('\n'.join('fn test_' + str(j) + '() { assert!(true); }' for j in range(lin
         local files=$(find "$WORKDIR/$ds" -type f | wc -l | tr -d ' ')
         >&2 echo "  $ds: ${files} files, ${size_kb} KB"
     done
+
+    # Dataset 4: 10 GB scaling dataset (reuse cached from scaling.sh if available)
+    if [ -f "$DATADIR/.generated" ]; then
+        local size_kb=$(du -sk "$DATADIR" | awk '{print $1}')
+        local files=$(find "$DATADIR" -type f -not -name '.generated' | wc -l | tr -d ' ')
+        >&2 echo "  10gb_mixed: ${files} files, ${size_kb} KB (cached)"
+    else
+        >&2 echo "  10gb_mixed: not available (run scaling.sh first to generate)"
+    fi
+
+    # Dataset 5: 10 GB heavy dedup (simulates backup snapshots / container layers)
+    DEDUP10G_DIR="$SCRIPT_DIR/.data-dedup10g"
+    DEDUP10G_STAMP="$DEDUP10G_DIR/.generated"
+    if [ -f "$DEDUP10G_STAMP" ]; then
+        local size_kb=$(du -sk "$DEDUP10G_DIR" | awk '{print $1}')
+        local files=$(find "$DEDUP10G_DIR" -type f -not -name '.generated' | wc -l | tr -d ' ')
+        >&2 echo "  dedup_10gb: ${files} files, ${size_kb} KB (cached)"
+    else
+        >&2 echo "  Generating ~10 GB heavy-dedup dataset (backup snapshots)..."
+        rm -rf "$DEDUP10G_DIR"
+        mkdir -p "$DEDUP10G_DIR/base"
+
+        # 2 GB of unique base data — 200 × 10 MB files
+        for i in $(seq 1 200); do
+            dd if=/dev/urandom bs=1M count=10 of="$DEDUP10G_DIR/base/file_$i.bin" 2>/dev/null
+            if [ $((i % 50)) -eq 0 ]; then
+                >&2 echo "    $i/200 base files"
+            fi
+        done
+
+        # 4 snapshots that copy the base and tweak ~10% of files each
+        for snap in $(seq 1 4); do
+            snap_dir="$DEDUP10G_DIR/snapshot_$snap"
+            cp -r "$DEDUP10G_DIR/base" "$snap_dir"
+            # Overwrite ~20 random files with new data per snapshot
+            for i in $(seq 1 20); do
+                target=$((RANDOM % 200 + 1))
+                dd if=/dev/urandom bs=1M count=10 of="$snap_dir/file_$target.bin" 2>/dev/null
+            done
+            >&2 echo "    snapshot $snap created"
+        done
+
+        touch "$DEDUP10G_STAMP"
+        local size_kb=$(du -sk "$DEDUP10G_DIR" | awk '{print $1}')
+        local files=$(find "$DEDUP10G_DIR" -type f -not -name '.generated' | wc -l | tr -d ' ')
+        >&2 echo "  dedup_10gb: ${files} files, ${size_kb} KB"
+    fi
 }
 
 bench_one() {
@@ -159,6 +209,17 @@ echo "tool,dataset,operation,time_ms,input_mb,output_mb,ratio"
 bench_one "source_project" "$WORKDIR/source_project"
 bench_one "dedup_heavy" "$WORKDIR/dedup_heavy"
 bench_one "large_mixed" "$WORKDIR/large_mixed"
+
+# 10 GB dataset — best of 3 (too large for 5 runs)
+if [ -f "$DATADIR/.generated" ]; then
+    bench_one "10gb_mixed" "$DATADIR" 3
+fi
+
+# 10 GB heavy dedup — best of 3
+DEDUP10G_DIR="$SCRIPT_DIR/.data-dedup10g"
+if [ -f "$DEDUP10G_DIR/.generated" ]; then
+    bench_one "dedup_10gb" "$DEDUP10G_DIR" 3
+fi
 
 >&2 echo ""
 >&2 echo "Done."

@@ -24,7 +24,7 @@
 
 Self-healing archive tool. Fast, checksummed, deduplicated.
 
-`self-repairing` ECC by default | `78% smaller` with dedup | `11x faster` on source code
+`self-repairing` ECC by default | `1.9 GB/s` parallel throughput | `73% smaller` with dedup
 
 [![CI](https://github.com/gnathoi/tardigrade/actions/workflows/ci.yml/badge.svg)](https://github.com/gnathoi/tardigrade/actions/workflows/ci.yml)
 [![Release](https://github.com/gnathoi/tardigrade/actions/workflows/release.yml/badge.svg)](https://github.com/gnathoi/tardigrade/actions/workflows/release.yml)
@@ -210,7 +210,7 @@ $ tdg extract backup.tg -o ./restored
 
 ## Benchmarks
 
-Apple Silicon (M-series, 10 cores). Run locally: `bash bench/run-all.sh`
+AMD Threadripper PRO 5975WX (64 cores). Run locally: `bash bench/run-all.sh`
 
 ### Speed
 
@@ -222,23 +222,23 @@ Apple Silicon (M-series, 10 cores). Run locally: `bash bench/run-all.sh`
 
 ### Key Results
 
-Best of 5 runs, process time only:
+Best of 5 runs (best of 3 for 10 GB datasets), process time only:
 
 | Dataset | tdg create | tar+zstd | Speedup | tdg extract | tar+zstd | Speedup | Size savings |
 |---------|-----------|----------|---------|-------------|----------|---------|-------------|
-| Source project (5 MB, 270 files) | 8ms | 91ms | **11.4x** | 34ms | 89ms | **2.6x** | ~equal |
-| Heavy dedup (13 MB, shared deps) | 9ms | 89ms | **9.9x** | 28ms | 93ms | **3.3x** | **78% smaller** |
-| Large mixed (94 MB, logs+bins) | 31ms | 35ms | **1.1x** | 39ms | 72ms | **1.8x** | **29% smaller** |
+| Source project (5 MB, 270 files) | 19ms | 29ms | **1.5x** | 21ms | 15ms | 0.7x | ~equal |
+| Heavy dedup (13 MB, shared deps) | 18ms | 25ms | **1.4x** | 18ms | 22ms | **1.2x** | **75% smaller** |
+| Large mixed (94 MB, logs+bins) | 95ms | 65ms | 0.7x | 69ms | 93ms | **1.3x** | **33% smaller** |
+| 10 GB mixed (10 GB, 1000 files) | 5.9s | 15.3s | **2.6x** | 10.8s | 8.6s | 0.8x | **23% smaller** |
+| 10 GB dedup (10 GB, backup snapshots) | 4.4s | 7.1s | **1.6x** | 5.4s | 8.0s | **1.5x** | **73% smaller** |
 
-tardigrade wins big on source code, projects with shared dependencies, anything with duplicate content. Parallel compression + dedup + skipping FastCDC for small files = 10x faster for typical developer workloads.
+tardigrade's strength is dedup — backup snapshots, container layers, anything with duplicate content compresses to a fraction of what tar+zstd produces. At 10 GB with heavy dedup: **2.7 GB vs 10 GB**. Create speed scales well on large datasets (2.6x at 10 GB). On large unique binary data, both tools are I/O bound.
 
-Large unique binary data is roughly equal. Both tools are I/O bound.
-
-### Core Scaling
+### Core Scaling (9.7 GB dataset)
 
 ![Core Scaling](bench/bench-scaling.svg)
 
-10 cores: ~2 GB/s. 32 cores (projected): ~2.2 GB/s. The serial fraction (~34%) is the dedup lookup + sequential write pass.
+Peak throughput: **1.9 GB/s at 28 threads**. Serial fraction: 22.5% (dedup lookup + sequential write pass). Performance plateaus around 28–36 threads, then declines slightly from memory bandwidth contention.
 
 ## Archive Format (.tg)
 

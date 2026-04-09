@@ -1,2 +1,4 @@
 /target
 .venv/
+bench/.data/
+bench/.data-dedup10g/
