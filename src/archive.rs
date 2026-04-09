@@ -27,6 +27,7 @@ pub struct CreateOptions {
     pub respect_gitignore: bool,
     pub passphrase: Option<Vec<u8>>,
     pub ecc_level: Option<EccLevel>,
+    pub allow_dedup_with_encryption: bool,
 }
 
 impl Default for CreateOptions {
@@ -38,6 +39,7 @@ impl Default for CreateOptions {
             respect_gitignore: true,
             passphrase: None,
             ecc_level: None,
+            allow_dedup_with_encryption: false,
         }
     }
 }
@@ -227,6 +229,7 @@ pub fn create_archive(
         (archive_key, encap)
     });
     let encrypted = encryption.is_some();
+    let dedup_enabled = !encrypted || opts.allow_dedup_with_encryption;
 
     let mut flags = if encrypted { FLAG_ENCRYPTED } else { 0 };
     if opts.ecc_level.is_some() {
@@ -287,7 +290,7 @@ pub fn create_archive(
             for chunk in pf.chunks {
                 stats.block_count += 1;
 
-                if !encrypted && let Some(existing_offset) = dedup.get(&chunk.hash) {
+                if dedup_enabled && let Some(existing_offset) = dedup.get(&chunk.hash) {
                     stats.dedup_savings += chunk.uncompressed_size as u64;
                     pf.entry.block_refs.push(BlockRef {
                         hash: chunk.hash,

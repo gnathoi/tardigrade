@@ -30,7 +30,8 @@ fn get_block(
     let data = match block::read_block(reader, offset, key) {
         Ok((_, data)) => data,
         Err(Error::ChecksumMismatch { .. }) if ecc_archive_path.is_some() => {
-            let (_, data) = reconstruct_block_via_ecc(reader, ecc_archive_path.unwrap(), offset)?;
+            let (_, data) =
+                reconstruct_block_via_ecc(reader, ecc_archive_path.unwrap(), offset, key)?;
             data
         }
         Err(e) => return Err(e),
@@ -66,10 +67,12 @@ pub fn read_index(reader: &mut (impl Read + Seek), footer: &Footer) -> Result<Ve
 }
 
 /// Attempt to reconstruct a corrupted block using ECC parity data.
+/// If the archive is encrypted, `key` must be provided to decrypt after reconstruction.
 fn reconstruct_block_via_ecc(
     reader: &mut (impl Read + Seek),
     archive_path: &Path,
     offset: u64,
+    key: Option<&SymmetricKey>,
 ) -> Result<(BlockHeader, Vec<u8>)> {
     let groups = crate::repair::scan_ecc_groups(archive_path)?;
 
@@ -127,8 +130,15 @@ fn reconstruct_block_via_ecc(
     reader.seek(SeekFrom::Start(offset))?;
     let header = BlockHeader::read_from(reader)?;
     let reconstructed = shards[block_idx].take().unwrap();
-    let compressed = &reconstructed[..header.compressed_size as usize];
-    let data = compress::decompress(compressed, header.codec, header.uncompressed_size as usize)?;
+    let raw = &reconstructed[..header.compressed_size as usize];
+
+    // Decrypt if encrypted, then decompress
+    let compressed = if let Some(k) = key {
+        encrypt::decrypt_block(raw, k, &header.hash)?
+    } else {
+        raw.to_vec()
+    };
+    let data = compress::decompress(&compressed, header.codec, header.uncompressed_size as usize)?;
 
     // Verify the reconstructed data
     let actual_hash: Hash = blake3::hash(&data).into();
@@ -182,7 +192,7 @@ pub fn cat_file(
         )));
     }
 
-    let ecc_path: Option<PathBuf> = if header.is_erasure_coded() && !header.is_encrypted() {
+    let ecc_path: Option<PathBuf> = if header.is_erasure_coded() {
         Some(archive_path.to_path_buf())
     } else {
         None
@@ -273,7 +283,7 @@ fn extract_archive_inner(
     let mut block_cache: HashMap<u64, std::sync::Arc<Vec<u8>>> = HashMap::new();
 
     // ECC recovery path (only for erasure-coded, non-encrypted archives)
-    let ecc_path: Option<PathBuf> = if header.is_erasure_coded() && !header.is_encrypted() {
+    let ecc_path: Option<PathBuf> = if header.is_erasure_coded() {
         Some(archive_path.to_path_buf())
     } else {
         None
@@ -525,6 +535,36 @@ mod tests {
         let dest = TempDir::new().unwrap();
         extract_archive_encrypted(&archive_path, dest.path(), b"test-passphrase-123").unwrap();
         let content = fs::read_to_string(dest.path().join("secret.txt")).unwrap();
+        assert_eq!(content, data);
+    }
+
+    #[test]
+    fn encrypted_with_ecc() {
+        let src = TempDir::new().unwrap();
+        let data = "encrypted + ECC data".repeat(500);
+        fs::write(src.path().join("file.txt"), &data).unwrap();
+
+        let archive_dir = TempDir::new().unwrap();
+        let archive_path = archive_dir.path().join("enc_ecc.tg");
+
+        let opts = CreateOptions {
+            passphrase: Some(b"test-pass".to_vec()),
+            ecc_level: Some(crate::erasure::EccLevel::LOW),
+            ..CreateOptions::default()
+        };
+        create_archive(&archive_path, &[src.path()], &opts).unwrap();
+
+        // Verify both flags are set
+        let file = std::fs::File::open(&archive_path).unwrap();
+        let mut reader = std::io::BufReader::new(file);
+        let header = crate::format::ArchiveHeader::read_from(&mut reader).unwrap();
+        assert!(header.is_encrypted(), "should be encrypted");
+        assert!(header.is_erasure_coded(), "should have ECC");
+
+        // Extract with correct passphrase
+        let dest = TempDir::new().unwrap();
+        extract_archive_encrypted(&archive_path, dest.path(), b"test-pass").unwrap();
+        let content = fs::read_to_string(dest.path().join("file.txt")).unwrap();
         assert_eq!(content, data);
     }
 
