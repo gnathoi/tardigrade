@@ -2,6 +2,16 @@
 
 All notable changes to tardigrade will be documented in this file.
 
+## [0.5.2] - 2026-04-09
+
+### Fixed
+- Progress bar compression ratio no longer stuck at 0.0x (scan stats were never populated).
+- Progress bar ETA no longer oscillates between seconds and days. Uses stable linear extrapolation instead of indicatif's exponential moving average.
+- Progress bar now updates continuously during compression instead of in bursts between batches.
+
+### Added
+- Elapsed time display in the progress bar.
+
 ## [0.5.1] - 2026-04-09
 
 ### Fixed
