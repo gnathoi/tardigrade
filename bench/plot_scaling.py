@@ -109,7 +109,6 @@ def plot(csv_path, output_dir):
     ax1.set_xlabel('threads', fontsize=9)
     ax1.set_ylabel('MB/s', fontsize=9)
     ax1.set_title('THROUGHPUT', fontsize=11, fontweight='bold', color=TEXT, loc='left', pad=8)
-    ax1.legend(fontsize=8, facecolor=PANEL, edgecolor=BORDER, labelcolor=DIM)
     ax1.set_xlim(0, min(extrap_max, 128) + 2)
     ax1.set_ylim(0, max(extrap_tp[:min(extrap_max, 128)]) * 1.15)
 
@@ -129,16 +128,20 @@ def plot(csv_path, output_dir):
     ax2.set_xlabel('threads', fontsize=9)
     ax2.set_ylabel('speedup', fontsize=9)
     ax2.set_title('SPEEDUP', fontsize=11, fontweight='bold', color=TEXT, loc='left', pad=8)
-    ax2.legend(fontsize=8, facecolor=PANEL, edgecolor=BORDER, labelcolor=DIM)
     ax2.set_xlim(0, min(extrap_max, 128) + 2)
     ax2.set_ylim(0, max(extrap_speedup[:min(extrap_max, 128)]) * 1.15)
+
+    # Single shared legend below the figure
+    handles, labels = ax1.get_legend_handles_labels()
+    fig.legend(handles, labels, loc='lower center', ncol=3, fontsize=8,
+               facecolor=PANEL, edgecolor=BORDER, labelcolor=DIM)
 
     meta = load_meta(output_dir)
     subtitle = 'tdg  /  core scaling  /  measured + extrapolated'
     if meta.get('version'):
         subtitle += f'  [{meta["version"]}]'
     fig.suptitle(subtitle, fontsize=10, color=DIM, fontfamily='monospace', y=0.98)
-    fig.tight_layout(rect=[0, 0, 1, 0.95])
+    fig.tight_layout(rect=[0, 0.06, 1, 0.95])
     fig.savefig(os.path.join(output_dir, 'bench-scaling.svg'), format='svg',
                 bbox_inches='tight', facecolor=BG)
     plt.close(fig)

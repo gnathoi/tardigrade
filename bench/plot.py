@@ -95,15 +95,19 @@ def plot_speed(rows, output_dir):
         ax.set_xticklabels([DATASET_LABELS[d] for d in datasets], fontsize=8)
         ax.set_ylabel('ms', fontsize=9)
         ax.set_title(title, fontsize=11, fontweight='bold', color=TEXT, loc='left', pad=8)
-        ax.legend(fontsize=8, facecolor=PANEL, edgecolor=BORDER, labelcolor=DIM)
         ax.set_ylim(0, ymax * 1.3)
+
+    # Single shared legend below the figure
+    handles, labels = axes[0].get_legend_handles_labels()
+    fig.legend(handles, labels, loc='lower center', ncol=2, fontsize=8,
+               facecolor=PANEL, edgecolor=BORDER, labelcolor=DIM)
 
     meta = load_meta(output_dir)
     subtitle = 'tdg vs tar+zstd  /  speed  /  lower is better'
     if meta.get('version'):
         subtitle += f'  [{meta["version"]}]'
     fig.suptitle(subtitle, fontsize=10, color=DIM, fontfamily='monospace', y=0.98)
-    fig.tight_layout(rect=[0, 0, 1, 0.95])
+    fig.tight_layout(rect=[0, 0.06, 1, 0.95])
     fig.savefig(os.path.join(output_dir, 'bench-speed.svg'), format='svg',
                 bbox_inches='tight', facecolor=BG)
     plt.close(fig)
