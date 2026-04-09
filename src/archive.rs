@@ -414,7 +414,7 @@ pub fn create_archive(
     }
 
     if let Some(ref p) = progress {
-        p.finish_scan();
+        p.start_finishing();
     }
 
     // Write index
