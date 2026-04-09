@@ -212,6 +212,11 @@ pub fn create_archive(
     let codec = opts.codec;
     let level = opts.level;
 
+    // Phase 2+3: Process files in parallel batches, write in walk order.
+    // Each batch is compressed in parallel via rayon, then written sequentially
+    // before the next batch starts. Memory is bounded to O(batch_size × file_size).
+    let batch_size = rayon::current_num_threads().max(4) * 4;
+
     let process_one =
         |(path, source, _size): &(std::path::PathBuf, std::path::PathBuf, u64)| -> Result<ProcessedFile> {
             let file_entry = capture_metadata(path, source)?;
@@ -230,10 +235,7 @@ pub fn create_archive(
             })
         };
 
-    // Always use parallel — rayon handles small workloads efficiently
-    let processed: Vec<Result<ProcessedFile>> = walk_entries.par_iter().map(process_one).collect();
-
-    // Phase 3: Sequential write with dedup
+    // Writer consumes from channel
     let file = File::create(archive_path).map_err(|e| Error::io_path(archive_path, e))?;
     let mut writer = BufWriter::with_capacity(WRITE_BUFFER_SIZE, file);
 
@@ -264,7 +266,7 @@ pub fn create_archive(
     }
 
     let mut dedup = DedupStore::new();
-    let mut entries: Vec<FileEntry> = Vec::with_capacity(walk_entries.len());
+    let mut entries: Vec<FileEntry> = Vec::with_capacity(256);
     let mut block_hashes: Vec<Hash> = Vec::new();
 
     let mut stats = CreateStats {
@@ -282,28 +284,75 @@ pub fn create_archive(
     // ECC group buffer
     let mut ecc_group = opts.ecc_level.as_ref().map(|_| EccGroup::new());
 
-    for result in processed {
-        let mut pf = result?;
+    for batch in walk_entries.chunks(batch_size) {
+        // Process batch in parallel, preserving walk order
+        let processed: Vec<Result<ProcessedFile>> = batch.par_iter().map(process_one).collect();
 
-        match &pf.entry.file_type {
-            FileType::Directory => stats.dir_count += 1,
-            FileType::File => {
-                stats.file_count += 1;
-                stats.total_input_size += pf.entry.size;
+        for result in processed {
+            let mut pf = result?;
+
+            match &pf.entry.file_type {
+                FileType::Directory => stats.dir_count += 1,
+                FileType::File => {
+                    stats.file_count += 1;
+                    stats.total_input_size += pf.entry.size;
+                }
+                FileType::Symlink(_) | FileType::Hardlink(_) => {
+                    stats.file_count += 1;
+                }
             }
-            FileType::Symlink(_) | FileType::Hardlink(_) => {
-                stats.file_count += 1;
-            }
-        }
 
-        for chunk in pf.chunks {
-            stats.block_count += 1;
+            for chunk in pf.chunks {
+                stats.block_count += 1;
 
-            if !encrypted && let Some(existing_offset) = dedup.get(&chunk.hash) {
-                stats.dedup_savings += chunk.uncompressed_size as u64;
+                if !encrypted && let Some(existing_offset) = dedup.get(&chunk.hash) {
+                    stats.dedup_savings += chunk.uncompressed_size as u64;
+                    pf.entry.block_refs.push(BlockRef {
+                        hash: chunk.hash,
+                        offset: existing_offset,
+                        slice_start: 0,
+                        slice_len: chunk.uncompressed_size,
+                        flags: 0,
+                        reserved: [0; 3],
+                    });
+
+                    if let Some(ref p) = progress {
+                        p.stats.blocks_deduped.fetch_add(1, Ordering::Relaxed);
+                        p.stats
+                            .dedup_savings
+                            .fetch_add(chunk.uncompressed_size as u64, Ordering::Relaxed);
+                        p.inc_compressed(chunk.uncompressed_size as u64);
+                    }
+                    continue;
+                }
+
+                let write_data = if let Some((ref key, _)) = encryption {
+                    encrypt::encrypt_block(&chunk.compressed_data, key, &chunk.hash)?
+                } else {
+                    chunk.compressed_data
+                };
+
+                let block_header = BlockHeader::new(
+                    chunk.hash,
+                    write_data.len() as u32,
+                    chunk.uncompressed_size,
+                    chunk.codec,
+                );
+
+                let block_offset = current_offset;
+                block_header.write_to(&mut writer)?;
+                writer.write_all(&write_data)?;
+
+                current_offset += BLOCK_HEADER_SIZE as u64 + write_data.len() as u64;
+                stats.total_compressed_size += write_data.len() as u64;
+                stats.unique_blocks += 1;
+
+                dedup.insert(chunk.hash, block_offset);
+                block_hashes.push(chunk.hash);
+
                 pf.entry.block_refs.push(BlockRef {
                     hash: chunk.hash,
-                    offset: existing_offset,
+                    offset: block_offset,
                     slice_start: 0,
                     slice_len: chunk.uncompressed_size,
                     flags: 0,
@@ -311,75 +360,33 @@ pub fn create_archive(
                 });
 
                 if let Some(ref p) = progress {
-                    p.stats.blocks_deduped.fetch_add(1, Ordering::Relaxed);
                     p.stats
-                        .dedup_savings
-                        .fetch_add(chunk.uncompressed_size as u64, Ordering::Relaxed);
+                        .bytes_written
+                        .fetch_add(write_data.len() as u64, Ordering::Relaxed);
                     p.inc_compressed(chunk.uncompressed_size as u64);
                 }
-                continue;
-            }
 
-            let write_data = if let Some((ref key, _)) = encryption {
-                encrypt::encrypt_block(&chunk.compressed_data, key, &chunk.hash)?
-            } else {
-                chunk.compressed_data
-            };
+                // Buffer shard for ECC group
+                if let (Some(group), Some(level)) = (&mut ecc_group, &opts.ecc_level) {
+                    group.add_shard(write_data);
 
-            let block_header = BlockHeader::new(
-                chunk.hash,
-                write_data.len() as u32,
-                chunk.uncompressed_size,
-                chunk.codec,
-            );
-
-            let block_offset = current_offset;
-            block_header.write_to(&mut writer)?;
-            writer.write_all(&write_data)?;
-
-            current_offset += BLOCK_HEADER_SIZE as u64 + write_data.len() as u64;
-            stats.total_compressed_size += write_data.len() as u64;
-            stats.unique_blocks += 1;
-
-            dedup.insert(chunk.hash, block_offset);
-            block_hashes.push(chunk.hash);
-
-            pf.entry.block_refs.push(BlockRef {
-                hash: chunk.hash,
-                offset: block_offset,
-                slice_start: 0,
-                slice_len: chunk.uncompressed_size,
-                flags: 0,
-                reserved: [0; 3],
-            });
-
-            if let Some(ref p) = progress {
-                p.stats
-                    .bytes_written
-                    .fetch_add(write_data.len() as u64, Ordering::Relaxed);
-                p.inc_compressed(chunk.uncompressed_size as u64);
-            }
-
-            // Buffer shard for ECC group
-            if let (Some(group), Some(level)) = (&mut ecc_group, &opts.ecc_level) {
-                group.add_shard(write_data);
-
-                if group.len() >= level.data_shards {
-                    current_offset = flush_ecc_group(
-                        group,
-                        level,
-                        &mut writer,
-                        current_offset,
-                        &mut block_hashes,
-                        &mut stats,
-                    )?;
-                    *group = EccGroup::new();
+                    if group.len() >= level.data_shards {
+                        current_offset = flush_ecc_group(
+                            group,
+                            level,
+                            &mut writer,
+                            current_offset,
+                            &mut block_hashes,
+                            &mut stats,
+                        )?;
+                        *group = EccGroup::new();
+                    }
                 }
             }
-        }
 
-        entries.push(pf.entry);
-    }
+            entries.push(pf.entry);
+        }
+    } // end batch loop
 
     // Flush any remaining partial ECC group
     if let (Some(group), Some(level)) = (&mut ecc_group, &opts.ecc_level)
