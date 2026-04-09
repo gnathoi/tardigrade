@@ -2,6 +2,17 @@
 
 All notable changes to tardigrade will be documented in this file.
 
+## [0.5.1] - 2026-04-09
+
+### Fixed
+- Archive creation no longer buffers the entire dataset in memory. Files are now processed in parallel batches with bounded memory usage, making it practical to archive datasets larger than available RAM.
+- Progress bar no longer stuck at 0B/s during compression. Progress updates flow as files are processed, not just during the final write phase.
+- Release `.tg` archive now contains a single platform binary instead of bundling all platform archives (was 5x larger than equivalent tar.gz).
+
+### Changed
+- `tdg update` now downloads `.tg` archives (dogfooding the format), with fallback to `.tar.gz` for older releases.
+- Release workflow creates per-platform `.tg` archives alongside `.tar.gz`/`.zip`.
+
 ## [0.5.0] - 2026-04-08
 
 ### Added
