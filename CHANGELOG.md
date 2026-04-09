@@ -2,6 +2,16 @@
 
 All notable changes to tardigrade will be documented in this file.
 
+## [0.7.0] - 2026-04-09
+
+### Added
+- ECC now works with encrypted archives. Self-healing parity is computed over ciphertext (encrypt-then-ECC). Previously encryption silently disabled ECC.
+- `--encrypt-allow-dedup` flag: opt in to dedup with encryption if you accept the privacy tradeoff (content-equality leakage). Off by default.
+- Argon2id key derivation for encryption (64 MB memory, 3 iterations). Replaces BLAKE3 derive_key. **BREAKING:** encrypted archives from prior versions cannot be decrypted.
+
+### Changed
+- Encrypted archives now get ECC protection by default (no flag change needed).
+
 ## [0.6.1] - 2026-04-09
 
 ### Fixed
