@@ -50,6 +50,7 @@ fn main() {
             level,
             no_ignore,
             encrypt,
+            encrypt_allow_dedup,
             append,
             incremental: incremental_base,
             ecc,
@@ -88,6 +89,7 @@ fn main() {
                     level,
                     no_ignore,
                     encrypt,
+                    encrypt_allow_dedup,
                     ecc,
                     cli.quiet,
                 )
@@ -146,6 +148,7 @@ fn cmd_create(
     level: i32,
     no_ignore: bool,
     encrypt: bool,
+    encrypt_allow_dedup: bool,
     ecc: Option<String>,
     quiet: bool,
 ) -> error::Result<()> {
@@ -163,10 +166,17 @@ fn cmd_create(
 
     let passphrase = if encrypt {
         if !quiet {
-            println!(
-                "  {}",
-                style("encryption enabled (dedup disabled for privacy)").dim()
-            );
+            if encrypt_allow_dedup {
+                println!(
+                    "  {}",
+                    style("encryption enabled (dedup ON — content equality visible)").dim()
+                );
+            } else {
+                println!(
+                    "  {}",
+                    style("encryption enabled (dedup disabled for privacy)").dim()
+                );
+            }
         }
         let pass = rpassword::prompt_password("Passphrase: ")
             .map_err(|e| error::Error::Io { source: e })?;
@@ -189,6 +199,7 @@ fn cmd_create(
         respect_gitignore: !no_ignore,
         passphrase,
         ecc_level,
+        allow_dedup_with_encryption: encrypt_allow_dedup,
     };
 
     let source_refs: Vec<&std::path::Path> = paths.iter().map(|p| p.as_path()).collect();
@@ -324,6 +335,7 @@ fn cmd_append(
         respect_gitignore: !no_ignore,
         passphrase: None,
         ecc_level,
+        allow_dedup_with_encryption: false,
     };
 
     let source_refs: Vec<&std::path::Path> = paths.iter().map(|p| p.as_path()).collect();
@@ -394,6 +406,7 @@ fn cmd_create_incremental(
         respect_gitignore: !no_ignore,
         passphrase: None,
         ecc_level,
+        allow_dedup_with_encryption: false,
     };
 
     let source_refs: Vec<&std::path::Path> = paths.iter().map(|p| p.as_path()).collect();

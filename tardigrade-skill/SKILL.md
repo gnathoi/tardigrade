@@ -49,7 +49,8 @@ tdg create --no-ignore archive.tg .        # include .gitignored files
 Flags:
 - `--compress <zstd|lz4|none>` — compression algorithm (default: zstd)
 - `-l, --level <1-19>` — compression level (default: 9)
-- `-e, --encrypt` — encrypt with passphrase using Argon2id + ChaCha20-Poly1305 (disables dedup for privacy)
+- `-e, --encrypt` — encrypt with passphrase using Argon2id + ChaCha20-Poly1305 (disables dedup for privacy, ECC still works)
+- `--encrypt-allow-dedup` — opt in to dedup with encryption (leaks whether blocks have identical content)
 - `--ecc <none|low|medium|high>` — Reed-Solomon erasure coding (default: low)
   - `none`: no ECC, smallest archive size
   - `low`: RS(10,2) ~20% overhead, recovers 2 lost blocks per group (default)

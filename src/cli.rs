@@ -54,6 +54,10 @@ pub enum Command {
         #[arg(long, short)]
         encrypt: bool,
 
+        /// Allow dedup with encryption (leaks whether blocks have identical content)
+        #[arg(long)]
+        encrypt_allow_dedup: bool,
+
         /// Append to an existing archive (temporal mode)
         #[arg(long)]
         append: bool,

@@ -78,6 +78,8 @@ tar and zip have zero protection against bit rot. One flipped bit and your data 
 
 **Encryption**
 - **ChaCha20-Poly1305 AEAD** with Argon2id key derivation (memory-hard, GPU-resistant)
+- ECC works with encryption: self-healing even for encrypted archives (parity over ciphertext)
+- Dedup disabled for encrypted archives (prevents hash-based content inference)
 
 **Archive operations**
 - **Temporal archives** — `--append` for point-in-time snapshots, `tdg log` to browse
@@ -110,6 +112,10 @@ tdg create backup.tg ./my-project
 # Extract
 tdg extract backup.tg -o ./restored
 
+# Print a single file without extracting
+tdg cat backup.tg path/to/file.txt
+tdg cat backup.tg config.yaml | head -20     # pipe-friendly
+
 # List contents
 tdg list backup.tg
 tdg list -l backup.tg    # detailed view
@@ -120,9 +126,12 @@ tdg info backup.tg
 # Verify integrity
 tdg verify backup.tg
 
-# Encrypted archive
+# Encrypted archive (ECC still works, dedup off for privacy)
 tdg create --encrypt secret.tg ./private-data
 tdg extract --decrypt secret.tg -o ./decrypted
+
+# Encrypted with dedup (user accepts content-equality leakage)
+tdg create --encrypt --encrypt-allow-dedup secret.tg ./private-data
 
 # Fast mode (lz4, lower compression, maximum speed)
 tdg create --compress lz4 fast.tg ./data
@@ -180,11 +189,11 @@ $ tdg create backup.tg ./my-project
 
   created backup.tg
 
-  21.71 MiB -> 7.66 MiB  2.8x  zstd
-  125 files, 11 dirs  127 blocks (123 unique)
-  1.95 MiB saved by dedup (4 duplicate blocks eliminated)
-  ecc: RS(10,2) 13 parity blocks ~20% overhead
-  0.03s  806 MB/s
+  195.37 KiB -> 891 B  224.5x  zstd
+  5 files, 2 dirs  5 blocks (4 unique)
+  97.66 KiB saved by dedup (1 duplicate blocks eliminated)
+  ecc: RS(10,2) 2 parity blocks ~20% overhead
+  0.02s  12 MB/s
 ```
 
 ```
@@ -193,8 +202,9 @@ $ tdg verify backup.tg
   verified backup.tg
 
   header ok  footer ok  index ok
-  blocks 123/123 ok, 0 corrupted
-  0.02s
+  blocks 4/4 ok, 0 corrupted
+  0.01s
+  ecc: 1 groups, 2 parity blocks
 ```
 
 ```
@@ -202,8 +212,8 @@ $ tdg extract backup.tg -o ./restored
 
   extracted backup.tg -> ./restored
 
-  21.71 MiB  125 files, 11 dirs
-  0.02s
+  195.37 KiB  5 files, 2 dirs
+  0.01s
 ```
 
 ## Benchmarks
@@ -272,6 +282,7 @@ Files are split at content boundaries (FastCDC, 64KB-1MB, target 256KB). Blocks 
 - Archive key: random 256-bit symmetric key
 - Block encryption: ChaCha20-Poly1305 AEAD, nonce derived from content hash
 - Key wrapping: passphrase -> Argon2id (64 MB, 3 iterations) -> wrapping key -> encrypted archive key
+- ECC works with encryption: parity is computed over ciphertext (encrypt-then-ECC)
 - Dedup disabled when encrypted (prevents hash-based content inference)
 
 ## Architecture
