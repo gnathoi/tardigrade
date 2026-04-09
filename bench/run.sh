@@ -93,6 +93,44 @@ print('\n'.join('fn test_' + str(j) + '() { assert!(true); }' for j in range(lin
     else
         >&2 echo "  10gb_mixed: not available (run scaling.sh first to generate)"
     fi
+
+    # Dataset 5: 10 GB heavy dedup (simulates backup snapshots / container layers)
+    DEDUP10G_DIR="$SCRIPT_DIR/.data-dedup10g"
+    DEDUP10G_STAMP="$DEDUP10G_DIR/.generated"
+    if [ -f "$DEDUP10G_STAMP" ]; then
+        local size_kb=$(du -sk "$DEDUP10G_DIR" | awk '{print $1}')
+        local files=$(find "$DEDUP10G_DIR" -type f -not -name '.generated' | wc -l | tr -d ' ')
+        >&2 echo "  dedup_10gb: ${files} files, ${size_kb} KB (cached)"
+    else
+        >&2 echo "  Generating ~10 GB heavy-dedup dataset (backup snapshots)..."
+        rm -rf "$DEDUP10G_DIR"
+        mkdir -p "$DEDUP10G_DIR/base"
+
+        # 2 GB of unique base data — 200 × 10 MB files
+        for i in $(seq 1 200); do
+            dd if=/dev/urandom bs=1M count=10 of="$DEDUP10G_DIR/base/file_$i.bin" 2>/dev/null
+            if [ $((i % 50)) -eq 0 ]; then
+                >&2 echo "    $i/200 base files"
+            fi
+        done
+
+        # 4 snapshots that copy the base and tweak ~10% of files each
+        for snap in $(seq 1 4); do
+            snap_dir="$DEDUP10G_DIR/snapshot_$snap"
+            cp -r "$DEDUP10G_DIR/base" "$snap_dir"
+            # Overwrite ~20 random files with new data per snapshot
+            for i in $(seq 1 20); do
+                target=$((RANDOM % 200 + 1))
+                dd if=/dev/urandom bs=1M count=10 of="$snap_dir/file_$target.bin" 2>/dev/null
+            done
+            >&2 echo "    snapshot $snap created"
+        done
+
+        touch "$DEDUP10G_STAMP"
+        local size_kb=$(du -sk "$DEDUP10G_DIR" | awk '{print $1}')
+        local files=$(find "$DEDUP10G_DIR" -type f -not -name '.generated' | wc -l | tr -d ' ')
+        >&2 echo "  dedup_10gb: ${files} files, ${size_kb} KB"
+    fi
 }
 
 bench_one() {
@@ -175,6 +213,12 @@ bench_one "large_mixed" "$WORKDIR/large_mixed"
 # 10 GB dataset — best of 3 (too large for 5 runs)
 if [ -f "$DATADIR/.generated" ]; then
     bench_one "10gb_mixed" "$DATADIR" 3
+fi
+
+# 10 GB heavy dedup — best of 3
+DEDUP10G_DIR="$SCRIPT_DIR/.data-dedup10g"
+if [ -f "$DEDUP10G_DIR/.generated" ]; then
+    bench_one "dedup_10gb" "$DEDUP10G_DIR" 3
 fi
 
 >&2 echo ""

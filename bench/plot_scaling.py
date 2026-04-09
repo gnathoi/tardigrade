@@ -69,67 +69,44 @@ def plot(csv_path, output_dir):
     s, t1 = amdahl_fit(threads, throughputs)
     max_measured = max(threads)
 
-    # Extrapolate beyond measured data — extend to 128 if measured past 32
-    extrap_max = max(128, max_measured * 2)
-    extrap_threads = list(range(1, extrap_max + 1))
-    extrap_tp = [t1 / (s + (1-s)/n) for n in extrap_threads]
+    # Fit curve over measured range only
+    fit_threads = np.linspace(1, max_measured, 200)
+    fit_tp = [t1 / (s + (1-s)/n) for n in fit_threads]
 
     fig, (ax1, ax2) = plt.subplots(1, 2, figsize=(12, 4.2))
     fig.patch.set_facecolor(BG)
 
     # --- Throughput ---
     setup_ax(ax1)
-    ax1.fill_between(extrap_threads, 0, extrap_tp, color=EXTRAP, alpha=0.08, zorder=1)
-    ax1.plot(extrap_threads, extrap_tp, '-', color=EXTRAP, linewidth=1.5, alpha=0.6,
-             label=f"amdahl (serial={s:.0%})")
-    ax1.plot(extrap_threads[:max_measured+1], [t1*n for n in extrap_threads[:max_measured+1]], '--',
+    linear_threads = np.linspace(1, max_measured, 200)
+    ax1.plot(linear_threads, [t1*n for n in linear_threads], '--',
              color=LINEAR, linewidth=1, label='linear')
-    ax1.plot(threads, throughputs, 'o-', color=TDG, linewidth=2,
-             markersize=6, markeredgecolor=PANEL, markeredgewidth=1.5,
-             label='measured', zorder=5)
-
-    ax1.axvline(x=max_measured, color=CALLOUT, linestyle=':', alpha=0.4, linewidth=0.8)
-
-    ax1.annotate(f'{throughputs[0]:.0f}', (threads[0], throughputs[0]),
-                 textcoords="offset points", xytext=(10, -3), fontsize=9,
-                 color=TDG, fontweight='bold')
-    ax1.annotate(f'{throughputs[-1]:.0f}', (threads[-1], throughputs[-1]),
-                 textcoords="offset points", xytext=(8, 6), fontsize=9,
-                 color=TDG, fontweight='bold')
-
-    # Annotate projection points beyond measured range
-    for cores in [32, 64, 128]:
-        if cores > max_measured:
-            tp = t1 / (s + (1-s)/cores)
-            ax1.plot(cores, tp, 's', color=CALLOUT, markersize=4, zorder=4)
-            ax1.annotate(f'{tp:.0f} MB/s @ {cores}c', (cores, tp),
-                         textcoords="offset points", xytext=(6, -12),
-                         fontsize=8, color=CALLOUT)
+    ax1.plot(fit_threads, fit_tp, '-', color=EXTRAP, linewidth=1.5, alpha=0.6,
+             label=f"amdahl fit (serial={s:.0%})")
+    ax1.scatter(threads, throughputs, color=TDG, s=30, zorder=5,
+                edgecolors=PANEL, linewidths=1.5, label='measured')
 
     ax1.set_xlabel('threads', fontsize=9)
     ax1.set_ylabel('MB/s', fontsize=9)
     ax1.set_title('THROUGHPUT', fontsize=11, fontweight='bold', color=TEXT, loc='left', pad=8)
-    ax1.set_xlim(0, min(extrap_max, 128) + 2)
-    ax1.set_ylim(0, max(extrap_tp[:min(extrap_max, 128)]) * 1.15)
+    ax1.set_xlim(0, max_measured + 2)
+    ax1.set_ylim(0, max(throughputs) * 1.15)
 
     # --- Speedup ---
     setup_ax(ax2)
     measured_speedup = [t / throughputs[0] for t in throughputs]
-    extrap_speedup = [tp / t1 for tp in extrap_tp]
+    fit_speedup = [tp / t1 for tp in fit_tp]
 
-    ax2.fill_between(extrap_threads, 0, extrap_speedup, color=EXTRAP, alpha=0.08, zorder=1)
-    ax2.plot(extrap_threads, extrap_speedup, '-', color=EXTRAP, linewidth=1.5, alpha=0.6, label="amdahl")
-    ax2.plot(extrap_threads, extrap_threads, '--', color=LINEAR, linewidth=1, label='linear')
-    ax2.plot(threads, measured_speedup, 'o-', color=TDG, linewidth=2,
-             markersize=6, markeredgecolor=PANEL, markeredgewidth=1.5,
-             label='measured', zorder=5)
-    ax2.axvline(x=max_measured, color=CALLOUT, linestyle=':', alpha=0.4, linewidth=0.8)
+    ax2.plot(linear_threads, linear_threads, '--', color=LINEAR, linewidth=1, label='linear')
+    ax2.plot(fit_threads, fit_speedup, '-', color=EXTRAP, linewidth=1.5, alpha=0.6, label='amdahl fit')
+    ax2.scatter(threads, measured_speedup, color=TDG, s=30, zorder=5,
+                edgecolors=PANEL, linewidths=1.5, label='measured')
 
     ax2.set_xlabel('threads', fontsize=9)
     ax2.set_ylabel('speedup', fontsize=9)
     ax2.set_title('SPEEDUP', fontsize=11, fontweight='bold', color=TEXT, loc='left', pad=8)
-    ax2.set_xlim(0, min(extrap_max, 128) + 2)
-    ax2.set_ylim(0, max(extrap_speedup[:min(extrap_max, 128)]) * 1.15)
+    ax2.set_xlim(0, max_measured + 2)
+    ax2.set_ylim(0, max(max(measured_speedup), max(fit_speedup)) * 1.15)
 
     # Single shared legend below the figure
     handles, labels = ax1.get_legend_handles_labels()
@@ -137,7 +114,7 @@ def plot(csv_path, output_dir):
                facecolor=PANEL, edgecolor=BORDER, labelcolor=DIM)
 
     meta = load_meta(output_dir)
-    subtitle = 'tdg  /  core scaling  /  measured + extrapolated'
+    subtitle = 'tdg  /  core scaling'
     if meta.get('version'):
         subtitle += f'  [{meta["version"]}]'
     fig.suptitle(subtitle, fontsize=10, color=DIM, fontfamily='monospace', y=0.98)

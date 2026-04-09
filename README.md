@@ -24,7 +24,7 @@
 
 Archive tool. Fast, checksummed, deduplicated.
 
-`1.5 GB/s` parallel throughput | `76% smaller` with dedup | checksummed & encrypted
+`1.9 GB/s` parallel throughput | `73% smaller` with dedup | checksummed & encrypted
 
 [![CI](https://github.com/gnathoi/tardigrade/actions/workflows/ci.yml/badge.svg)](https://github.com/gnathoi/tardigrade/actions/workflows/ci.yml)
 [![Release](https://github.com/gnathoi/tardigrade/actions/workflows/release.yml/badge.svg)](https://github.com/gnathoi/tardigrade/actions/workflows/release.yml)
@@ -194,21 +194,23 @@ AMD Threadripper PRO 5975WX (64 cores). Run locally: `bash bench/run-all.sh`
 
 ### Key Results
 
-Best of 5 runs, process time only:
+Best of 5 runs (best of 3 for 10 GB datasets), process time only:
 
 | Dataset | tdg create | tar+zstd | Speedup | tdg extract | tar+zstd | Speedup | Size savings |
 |---------|-----------|----------|---------|-------------|----------|---------|-------------|
-| Source project (5 MB, 270 files) | 19ms | 28ms | **1.5x** | 21ms | 14ms | 0.7x | ~equal |
-| Heavy dedup (13 MB, shared deps) | 18ms | 26ms | **1.4x** | 17ms | 20ms | **1.2x** | **76% smaller** |
-| Large mixed (94 MB, logs+bins) | 93ms | 62ms | 0.7x | 70ms | 89ms | **1.3x** | **33% smaller** |
+| Source project (5 MB, 270 files) | 19ms | 29ms | **1.5x** | 21ms | 15ms | 0.7x | ~equal |
+| Heavy dedup (13 MB, shared deps) | 18ms | 25ms | **1.4x** | 18ms | 22ms | **1.2x** | **75% smaller** |
+| Large mixed (94 MB, logs+bins) | 95ms | 65ms | 0.7x | 69ms | 93ms | **1.3x** | **33% smaller** |
+| 10 GB mixed (10 GB, 1000 files) | 5.9s | 15.3s | **2.6x** | 10.8s | 8.6s | 0.8x | **23% smaller** |
+| 10 GB dedup (10 GB, backup snapshots) | 4.4s | 7.1s | **1.6x** | 5.4s | 8.0s | **1.5x** | **73% smaller** |
 
-tardigrade's strength is dedup — projects with shared dependencies or duplicate content compress to a fraction of what tar+zstd produces. Extract speed is competitive or faster. On large unique binary data, both tools are I/O bound and roughly equal.
+tardigrade's strength is dedup — backup snapshots, container layers, anything with duplicate content compresses to a fraction of what tar+zstd produces. At 10 GB with heavy dedup: **2.7 GB vs 10 GB**. Create speed scales well on large datasets (2.6x at 10 GB). On large unique binary data, both tools are I/O bound.
 
-### Core Scaling (7.6 GB dataset)
+### Core Scaling (9.7 GB dataset)
 
 ![Core Scaling](bench/bench-scaling.svg)
 
-Peak throughput: **1.5 GB/s at 36 threads**. Serial fraction: 23.1% (dedup lookup + sequential write pass). Performance is flat from 28–36 threads, then declines slightly from memory bandwidth contention beyond 40 threads.
+Peak throughput: **1.9 GB/s at 28 threads**. Serial fraction: 22.5% (dedup lookup + sequential write pass). Performance plateaus around 28–36 threads, then declines slightly from memory bandwidth contention.
 
 ## Archive Format (.tg)
 

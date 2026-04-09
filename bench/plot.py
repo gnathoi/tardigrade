@@ -15,6 +15,7 @@ DATASET_LABELS = {
     'dedup_heavy': 'Heavy Dedup\nshared deps, 13 MB',
     'large_mixed': 'Large Mixed\nlogs+bins, 102 MB',
     '10gb_mixed': '10 GB Mixed\n1000 files, 10 GB',
+    'dedup_10gb': '10 GB Dedup\nbackup snapshots, 10 GB',
 }
 
 BG = '#0e1117'
@@ -85,12 +86,6 @@ def plot_speed(rows, output_dir):
             ax.text(x[i] + w/2, tar_t[i] + ymax*0.02, f'{tar_t[i]}',
                     ha='center', va='bottom', fontsize=9, color=DIM, fontfamily='monospace')
 
-            if tar_t[i] > 0 and tdg_t[i] > 0:
-                speedup = tar_t[i] / tdg_t[i]
-                if speedup > 1.3:
-                    ax.text(x[i], ymax * 1.12, f'{speedup:.1f}x',
-                            ha='center', fontsize=11, color=TDG, fontweight='bold')
-
         ax.set_xticks(x)
         ax.set_xticklabels([DATASET_LABELS[d] for d in datasets], fontsize=8)
         ax.set_ylabel('ms', fontsize=9)
@@ -143,13 +138,6 @@ def plot_size(rows, output_dir):
         ax.text(tar_sizes[i] + xmax*0.01, y[i] + h/2,
                 f'{tar_sizes[i]:.1f} MB', va='center', fontsize=9,
                 color=DIM, fontfamily='monospace')
-
-        if tar_sizes[i] > 0:
-            pct = (1 - tdg_sizes[i]/tar_sizes[i]) * 100
-            if pct > 5:
-                ax.text(xmax * 0.96, y[i], f'-{pct:.0f}%',
-                        ha='right', va='center', fontsize=11,
-                        color=TDG, fontweight='bold', fontfamily='monospace')
 
     ax.set_yticks(y)
     ax.set_yticklabels([DATASET_LABELS[d] for d in datasets], fontsize=9)
