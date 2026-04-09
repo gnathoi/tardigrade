@@ -90,12 +90,31 @@ jobs:
           sha256sum tdg-* > SHA256SUMS
           b3sum tdg-* > B3SUMS
 
-      - name: Dogfood — create .tg archive of release binary
+      - name: Dogfood — create .tg archives from each platform binary
         run: |
           tar xzf artifacts/tdg-x86_64-unknown-linux-gnu.tar.gz -C /tmp
           chmod +x /tmp/tdg
-          /tmp/tdg create artifacts/tdg-x86_64-unknown-linux-gnu.tg /tmp/tdg
-          /tmp/tdg verify artifacts/tdg-x86_64-unknown-linux-gnu.tg
+
+          # Create a .tg for each unix target
+          for tgz in artifacts/tdg-*.tar.gz; do
+            target=$(basename "$tgz" .tar.gz)
+            tmpdir=$(mktemp -d)
+            tar xzf "$tgz" -C "$tmpdir"
+            /tmp/tdg create "artifacts/${target}.tg" "$tmpdir/tdg"
+            /tmp/tdg verify "artifacts/${target}.tg"
+            rm -rf "$tmpdir"
+          done
+
+          # Create a .tg for each windows target
+          for z in artifacts/tdg-*.zip; do
+            [ -f "$z" ] || continue
+            target=$(basename "$z" .zip)
+            tmpdir=$(mktemp -d)
+            unzip -o "$z" -d "$tmpdir"
+            /tmp/tdg create "artifacts/${target}.tg" "$tmpdir/tdg.exe"
+            /tmp/tdg verify "artifacts/${target}.tg"
+            rm -rf "$tmpdir"
+          done
 
       - name: Create release
         uses: softprops/action-gh-release@v2

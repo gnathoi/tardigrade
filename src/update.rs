@@ -24,6 +24,24 @@ pub fn platform_asset_name(os: &str, arch: &str) -> error::Result<String> {
         }
     };
 
+    Ok(format!("tdg-{target}.tg"))
+}
+
+/// Fallback asset name (.tar.gz/.zip) for releases before .tg was available.
+fn platform_asset_name_fallback(os: &str, arch: &str) -> error::Result<String> {
+    let target = match (os, arch) {
+        ("linux", "x86_64") => "x86_64-unknown-linux-gnu",
+        ("linux", "aarch64") => "aarch64-unknown-linux-gnu",
+        ("macos", "x86_64") => "x86_64-apple-darwin",
+        ("macos", "aarch64") => "aarch64-apple-darwin",
+        ("windows", "x86_64") => "x86_64-pc-windows-msvc",
+        _ => {
+            return Err(error::Error::Update(format!(
+                "unsupported platform: {os}/{arch}"
+            )));
+        }
+    };
+
     let ext = if os == "windows" { "zip" } else { "tar.gz" };
     Ok(format!("tdg-{target}.{ext}"))
 }
@@ -141,6 +159,37 @@ fn verify_checksum(data: &[u8], sums_content: &str, expected_filename: &str) -> 
     )))
 }
 
+/// Extract the `tdg` binary from a .tg archive in memory. Returns the binary bytes.
+fn extract_binary_from_tg(data: &[u8]) -> error::Result<Vec<u8>> {
+    let tmp_dir = tempfile::tempdir()
+        .map_err(|e| error::Error::Update(format!("failed to create temp dir: {e}")))?;
+
+    // Write .tg to a temp file so extract_archive can read it
+    let tg_path = tmp_dir.path().join("update.tg");
+    fs::write(&tg_path, data)
+        .map_err(|e| error::Error::Update(format!("failed to write temp archive: {e}")))?;
+
+    let dest = tmp_dir.path().join("out");
+    crate::extract::extract_archive(&tg_path, &dest)
+        .map_err(|e| error::Error::Update(format!("failed to extract .tg archive: {e}")))?;
+
+    // Find the binary — it's either "tdg" or "tdg.exe"
+    let binary_name = if env::consts::OS == "windows" { "tdg.exe" } else { "tdg" };
+    for entry in fs::read_dir(&dest)
+        .map_err(|e| error::Error::Update(format!("failed to read extracted dir: {e}")))?
+    {
+        let entry = entry.map_err(|e| error::Error::Update(format!("{e}")))?;
+        if entry.file_name() == binary_name {
+            return fs::read(entry.path())
+                .map_err(|e| error::Error::Update(format!("failed to read binary: {e}")));
+        }
+    }
+
+    Err(error::Error::Update(
+        "tdg binary not found in .tg archive".into(),
+    ))
+}
+
 /// Extract the `tdg` binary from a tar.gz archive in memory. Returns the binary bytes.
 fn extract_binary_from_targz(data: &[u8]) -> error::Result<Vec<u8>> {
     use flate2::read::GzDecoder;
@@ -227,22 +276,40 @@ pub fn do_update(quiet: bool) -> error::Result<()> {
         }
     };
 
-    // Download the binary archive
+    // Try .tg first, fall back to .tar.gz/.zip for older releases
     if !quiet {
         eprint!("  downloading {asset_name}... ");
     }
     let archive_url = format!("{download_base}/{asset_name}");
-    let archive_data = download(&archive_url)?;
-    if !quiet {
-        eprintln!("{}", console::style("ok").green());
-    }
+    let (archive_data, actual_asset_name, is_tg) = match download(&archive_url) {
+        Ok(data) => {
+            if !quiet {
+                eprintln!("{}", console::style("ok").green());
+            }
+            (data, asset_name, true)
+        }
+        Err(_) => {
+            // Fall back to legacy format
+            let fallback = platform_asset_name_fallback(env::consts::OS, env::consts::ARCH)?;
+            if !quiet {
+                eprintln!("{}", console::style("not found, trying legacy format").yellow());
+                eprint!("  downloading {fallback}... ");
+            }
+            let url = format!("{download_base}/{fallback}");
+            let data = download(&url)?;
+            if !quiet {
+                eprintln!("{}", console::style("ok").green());
+            }
+            (data, fallback, false)
+        }
+    };
 
     // Verify checksum
     if let Some(ref sums) = sums_content {
         if !quiet {
             eprint!("  verifying checksum... ");
         }
-        verify_checksum(&archive_data, sums, &asset_name)?;
+        verify_checksum(&archive_data, sums, &actual_asset_name)?;
         if !quiet {
             eprintln!("{}", console::style("ok").green());
         }
@@ -253,8 +320,9 @@ pub fn do_update(quiet: bool) -> error::Result<()> {
         eprint!("  extracting... ");
     }
 
-    let binary_data = if asset_name.ends_with(".zip") {
-        // Windows zip — for now just error, self_replace handles the rest
+    let binary_data = if is_tg {
+        extract_binary_from_tg(&archive_data)?
+    } else if actual_asset_name.ends_with(".zip") {
         return Err(error::Error::Update(
             "Windows zip extraction not yet supported in self-update. Download manually from GitHub releases.".into(),
         ));
@@ -357,23 +425,23 @@ mod tests {
     fn test_platform_asset_name() {
         assert_eq!(
             platform_asset_name("linux", "x86_64").unwrap(),
-            "tdg-x86_64-unknown-linux-gnu.tar.gz"
+            "tdg-x86_64-unknown-linux-gnu.tg"
         );
         assert_eq!(
             platform_asset_name("linux", "aarch64").unwrap(),
-            "tdg-aarch64-unknown-linux-gnu.tar.gz"
+            "tdg-aarch64-unknown-linux-gnu.tg"
         );
         assert_eq!(
             platform_asset_name("macos", "x86_64").unwrap(),
-            "tdg-x86_64-apple-darwin.tar.gz"
+            "tdg-x86_64-apple-darwin.tg"
         );
         assert_eq!(
             platform_asset_name("macos", "aarch64").unwrap(),
-            "tdg-aarch64-apple-darwin.tar.gz"
+            "tdg-aarch64-apple-darwin.tg"
         );
         assert_eq!(
             platform_asset_name("windows", "x86_64").unwrap(),
-            "tdg-x86_64-pc-windows-msvc.zip"
+            "tdg-x86_64-pc-windows-msvc.tg"
         );
     }
 
