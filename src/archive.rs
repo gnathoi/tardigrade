@@ -229,11 +229,15 @@ pub fn create_archive(
                         bytes.fetch_add(size, Ordering::Relaxed);
                         let count = file_count.fetch_add(1, Ordering::Relaxed) + 1;
                         if let Some(sp) = scan_spinner
-                            && count.is_multiple_of(1000) {
-                                sp.set_message(format!("scanning… {} files", count));
-                            }
+                            && count.is_multiple_of(1000)
+                        {
+                            sp.set_message(format!("scanning… {} files", count));
+                        }
                     }
-                    entries.lock().unwrap().push((path, source_path.clone(), size));
+                    entries
+                        .lock()
+                        .unwrap()
+                        .push((path, source_path.clone(), size));
                     ignore::WalkState::Continue
                 })
             });

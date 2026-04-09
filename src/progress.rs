@@ -27,7 +27,6 @@ impl ProgressStats {
     }
 }
 
-
 /// Progress display for archive creation
 pub struct CreateProgress {
     _multi: MultiProgress,
@@ -58,9 +57,7 @@ impl CreateProgress {
         // Status line — uses {spinner} which animates via steady_tick automatically
         let status_style = ProgressStyle::with_template("  {spinner:.cyan} {msg}")
             .unwrap()
-            .tick_strings(&[
-                "⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏", "",
-            ]);
+            .tick_strings(&["⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏", ""]);
 
         let status_bar = multi.add(ProgressBar::new_spinner());
         status_bar.set_style(status_style);
@@ -141,9 +138,7 @@ impl CreateProgress {
         // Switch main bar to a spinner style for the finishing phase
         let finish_style = ProgressStyle::with_template("  {spinner:.cyan} {msg}")
             .unwrap()
-            .tick_strings(&[
-                "⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏", "",
-            ]);
+            .tick_strings(&["⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏", ""]);
         self.main_bar.set_style(finish_style);
         self.main_bar
             .set_message(format!("{}", style("finishing up…").dim()));
