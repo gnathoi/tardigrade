@@ -174,7 +174,11 @@ fn extract_binary_from_tg(data: &[u8]) -> error::Result<Vec<u8>> {
         .map_err(|e| error::Error::Update(format!("failed to extract .tg archive: {e}")))?;
 
     // Find the binary — it's either "tdg" or "tdg.exe"
-    let binary_name = if env::consts::OS == "windows" { "tdg.exe" } else { "tdg" };
+    let binary_name = if env::consts::OS == "windows" {
+        "tdg.exe"
+    } else {
+        "tdg"
+    };
     for entry in fs::read_dir(&dest)
         .map_err(|e| error::Error::Update(format!("failed to read extracted dir: {e}")))?
     {
@@ -292,7 +296,10 @@ pub fn do_update(quiet: bool) -> error::Result<()> {
             // Fall back to legacy format
             let fallback = platform_asset_name_fallback(env::consts::OS, env::consts::ARCH)?;
             if !quiet {
-                eprintln!("{}", console::style("not found, trying legacy format").yellow());
+                eprintln!(
+                    "{}",
+                    console::style("not found, trying legacy format").yellow()
+                );
                 eprint!("  downloading {fallback}... ");
             }
             let url = format!("{download_base}/{fallback}");
