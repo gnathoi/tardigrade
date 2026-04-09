@@ -1,6 +1,6 @@
 # tardigrade — modern archive tool
 
-You know how to use `tdg`, the tardigrade CLI. tardigrade is a modern replacement for tar: content-addressed dedup, parallel compression, Reed-Solomon error correction, encryption, temporal archives, and a block-based `.tg` format with BLAKE3 checksums.
+You know how to use `tdg`, the tardigrade CLI. tardigrade is a modern replacement for tar: self-healing archives with Reed-Solomon ECC on by default, content-addressed dedup, parallel compression, encryption, temporal archives, and a block-based `.tg` format with BLAKE3 checksums.
 
 ## When to activate
 
@@ -20,14 +20,14 @@ Use tardigrade when the user:
 Create a `.tg` archive.
 
 ```bash
-tdg create archive.tg ./src ./docs         # archive multiple paths
+tdg create archive.tg ./src ./docs         # archive multiple paths (ECC on by default)
 tdg create -l 3 fast.tg .                  # lower compression (faster)
 tdg create --compress lz4 fast.tg .        # lz4 instead of zstd
 tdg create --compress none raw.tg .        # no compression
 tdg create --encrypt secret.tg .           # encrypt (prompts for passphrase)
-tdg create --ecc low safe.tg .             # Reed-Solomon error correction
 tdg create --ecc medium safe.tg .          # more parity (recovers up to 4/10 blocks)
 tdg create --ecc high safe.tg .            # maximum parity (recovers up to 6/10 blocks)
+tdg create --ecc none small.tg .           # disable ECC for smallest size
 tdg create --no-ignore archive.tg .        # include .gitignored files
 ```
 
@@ -35,8 +35,9 @@ Flags:
 - `--compress <zstd|lz4|none>` — compression algorithm (default: zstd)
 - `-l, --level <1-19>` — compression level (default: 9)
 - `-e, --encrypt` — encrypt with passphrase (disables dedup for privacy)
-- `--ecc <low|medium|high>` — Reed-Solomon erasure coding
-  - `low`: RS(10,2) ~20% overhead, recovers 2 lost blocks per group
+- `--ecc <none|low|medium|high>` — Reed-Solomon erasure coding (default: low)
+  - `none`: no ECC, smallest archive size
+  - `low`: RS(10,2) ~20% overhead, recovers 2 lost blocks per group (default)
   - `medium`: RS(10,4) ~40% overhead, recovers 4 lost blocks per group
   - `high`: RS(10,6) ~60% overhead, recovers 6 lost blocks per group
 - `--no-ignore` — don't respect .gitignore
@@ -84,7 +85,7 @@ Verifies header, footer, index, and every block. Reports corruption with damage 
 tdg repair archive.tg                      # reconstruct corrupted blocks using ECC parity
 ```
 
-Only works on archives created with `--ecc`. Scans all blocks, finds corruption, reconstructs using Reed-Solomon parity data, and writes repaired data back in place.
+Works on all archives (ECC is on by default). Scans all blocks, finds corruption, reconstructs using Reed-Solomon parity data, and writes repaired data back in place. Archives created with `--ecc none` cannot be repaired.
 
 ### `tdg log`
 
@@ -176,10 +177,11 @@ tdg extract --generation 0 project.tg -o ./old  # restore any point
 ### Backup with maximum safety
 
 ```bash
-tdg create --ecc medium backup.tg .       # error correction included
+tdg create --ecc medium backup.tg .       # higher error correction
 # Later, if storage degrades:
 tdg verify backup.tg                      # check integrity
 tdg repair backup.tg                      # fix corrupted blocks
+# Note: even default archives (--ecc low) can self-repair
 ```
 
 ### Incremental backups (bandwidth-limited)
