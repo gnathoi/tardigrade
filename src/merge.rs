@@ -72,14 +72,23 @@ pub fn merge_archives(a_path: &Path, b_path: &Path, output_path: &Path) -> Resul
     for entry in &merged_entries {
         for bref in &entry.block_refs {
             needed_blocks.entry(bref.hash).or_insert_with(|| {
-                // Check if this block exists in A or B
-                let in_a = a_entries
+                // Find the block's offset in the archive we'll actually read from.
+                // Prefer archive A; use the offset from that archive (not from the
+                // winning entry, which may be from the other archive).
+                if let Some(a_ref) = a_entries
                     .iter()
-                    .any(|e| e.block_refs.iter().any(|r| r.hash == bref.hash));
-                if in_a {
-                    (bref.offset, false)
+                    .flat_map(|e| &e.block_refs)
+                    .find(|r| r.hash == bref.hash)
+                {
+                    (a_ref.offset, false)
                 } else {
-                    (bref.offset, true)
+                    let b_offset = b_entries
+                        .iter()
+                        .flat_map(|e| &e.block_refs)
+                        .find(|r| r.hash == bref.hash)
+                        .map(|r| r.offset)
+                        .unwrap_or(bref.offset);
+                    (b_offset, true)
                 }
             });
         }
