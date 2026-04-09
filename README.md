@@ -112,6 +112,10 @@ tdg create backup.tg ./my-project
 # Extract
 tdg extract backup.tg -o ./restored
 
+# Print a single file without extracting
+tdg cat backup.tg path/to/file.txt
+tdg cat backup.tg config.yaml | head -20     # pipe-friendly
+
 # List contents
 tdg list backup.tg
 tdg list -l backup.tg    # detailed view
@@ -122,9 +126,12 @@ tdg info backup.tg
 # Verify integrity
 tdg verify backup.tg
 
-# Encrypted archive
+# Encrypted archive (ECC still works, dedup off for privacy)
 tdg create --encrypt secret.tg ./private-data
 tdg extract --decrypt secret.tg -o ./decrypted
+
+# Encrypted with dedup (user accepts content-equality leakage)
+tdg create --encrypt --encrypt-allow-dedup secret.tg ./private-data
 
 # Fast mode (lz4, lower compression, maximum speed)
 tdg create --compress lz4 fast.tg ./data
