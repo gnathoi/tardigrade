@@ -90,12 +90,12 @@ jobs:
           sha256sum tdg-* > SHA256SUMS
           b3sum tdg-* > B3SUMS
 
-      - name: Dogfood — create .tg archive of release artifacts
+      - name: Dogfood — create .tg archive of release binary
         run: |
           tar xzf artifacts/tdg-x86_64-unknown-linux-gnu.tar.gz -C /tmp
           chmod +x /tmp/tdg
-          /tmp/tdg create --no-ignore artifacts/tardigrade-dist.tg artifacts/
-          /tmp/tdg verify artifacts/tardigrade-dist.tg
+          /tmp/tdg create artifacts/tdg-x86_64-unknown-linux-gnu.tg /tmp/tdg
+          /tmp/tdg verify artifacts/tdg-x86_64-unknown-linux-gnu.tg
 
       - name: Create release
         uses: softprops/action-gh-release@v2
