@@ -8,6 +8,7 @@ import matplotlib
 matplotlib.use('Agg')
 import matplotlib.pyplot as plt
 import numpy as np
+from scipy.optimize import curve_fit
 
 BG = '#0e1117'
 PANEL = '#161b22'
@@ -29,6 +30,17 @@ plt.rcParams.update({
     'ytick.color': DIM,
 })
 
+def load_meta(csv_dir):
+    meta_path = os.path.join(csv_dir, 'meta.txt')
+    meta = {}
+    if os.path.exists(meta_path):
+        with open(meta_path) as f:
+            for line in f:
+                if '=' in line:
+                    k, v = line.strip().split('=', 1)
+                    meta[k] = v
+    return meta
+
 def load_csv(path):
     threads, times, throughputs = [], [], []
     with open(path) as f:
@@ -39,12 +51,21 @@ def load_csv(path):
     return threads, times, throughputs
 
 def amdahl_fit(threads, throughputs):
-    t1 = throughputs[0]
-    n_max = threads[-1]
-    tp_max = throughputs[-1]
-    ratio = t1 / tp_max
-    s = (ratio - 1.0/n_max) / (1.0 - 1.0/n_max)
-    return max(0.01, min(0.99, s)), t1
+    """Least-squares fit of Amdahl's law + overhead: tp(n) = t1 / (s + (1-s)/n + c*n).
+    The c*n term models per-thread overhead (contention, cache pressure)."""
+    threads_a = np.array(threads, dtype=float)
+    tp_a = np.array(throughputs, dtype=float)
+
+    def model(n, t1, s, c):
+        return t1 / (s + (1 - s) / n + c * n)
+
+    t1_init = tp_a[0]
+    ratio = t1_init / tp_a[-1]
+    s_init = max(0.05, (ratio - 1.0/threads_a[-1]) / (1.0 - 1.0/threads_a[-1]))
+
+    popt, _ = curve_fit(model, threads_a, tp_a, p0=[t1_init, s_init, 1e-4],
+                        bounds=([0, 0.001, 0], [np.inf, 0.999, 1.0]))
+    return popt[1], popt[0], popt[2]  # s, t1, c
 
 def setup_ax(ax):
     ax.set_facecolor(PANEL)
@@ -55,78 +76,64 @@ def setup_ax(ax):
 
 def plot(csv_path, output_dir):
     threads, times, throughputs = load_csv(csv_path)
-    s, t1 = amdahl_fit(threads, throughputs)
+    s, t1, c = amdahl_fit(threads, throughputs)
     max_measured = max(threads)
 
-    extrap_threads = list(range(1, 65))
-    extrap_tp = [t1 / (s + (1-s)/n) for n in extrap_threads]
+    # Fit curve over measured range only
+    fit_threads = np.linspace(1, max_measured, 200)
+    fit_tp = [t1 / (s + (1-s)/n + c*n) for n in fit_threads]
 
     fig, (ax1, ax2) = plt.subplots(1, 2, figsize=(12, 4.2))
     fig.patch.set_facecolor(BG)
 
     # --- Throughput ---
     setup_ax(ax1)
-    ax1.fill_between(extrap_threads, 0, extrap_tp, color=EXTRAP, alpha=0.08, zorder=1)
-    ax1.plot(extrap_threads, extrap_tp, '-', color=EXTRAP, linewidth=1.5, alpha=0.6,
-             label=f"amdahl (serial={s:.0%})")
-    ax1.plot(extrap_threads[:32], [t1*n for n in extrap_threads[:32]], '--',
-             color=LINEAR, linewidth=1, label='linear')
-    ax1.plot(threads, throughputs, 'o-', color=TDG, linewidth=2,
-             markersize=6, markeredgecolor=PANEL, markeredgewidth=1.5,
-             label='measured', zorder=5)
-
-    ax1.axvline(x=max_measured, color=CALLOUT, linestyle=':', alpha=0.4, linewidth=0.8)
-
-    ax1.annotate(f'{throughputs[0]:.0f}', (threads[0], throughputs[0]),
-                 textcoords="offset points", xytext=(10, -3), fontsize=9,
-                 color=TDG, fontweight='bold')
-    ax1.annotate(f'{throughputs[-1]:.0f}', (threads[-1], throughputs[-1]),
-                 textcoords="offset points", xytext=(8, 6), fontsize=9,
-                 color=TDG, fontweight='bold')
-
-    for cores in [32, 64]:
-        tp = t1 / (s + (1-s)/cores)
-        ax1.plot(cores, tp, 's', color=CALLOUT, markersize=4, zorder=4)
-        ax1.annotate(f'{tp:.0f} MB/s @ {cores}c', (cores, tp),
-                     textcoords="offset points", xytext=(6, -12),
-                     fontsize=8, color=CALLOUT)
+    ax1.plot(fit_threads, fit_tp, '-', color=EXTRAP, linewidth=1.5, alpha=0.6,
+             label=f"amdahl+overhead (s={s:.0%})")
+    ax1.scatter(threads, throughputs, color=TDG, s=30, zorder=5,
+                edgecolors=PANEL, linewidths=1.5, label='measured')
 
     ax1.set_xlabel('threads', fontsize=9)
     ax1.set_ylabel('MB/s', fontsize=9)
     ax1.set_title('THROUGHPUT', fontsize=11, fontweight='bold', color=TEXT, loc='left', pad=8)
-    ax1.legend(fontsize=8, facecolor=PANEL, edgecolor=BORDER, labelcolor=DIM)
-    ax1.set_xlim(0, 66)
-    ax1.set_ylim(0, max(extrap_tp[:64]) * 1.15)
+    ax1.set_xlim(0, max_measured + 2)
+    ax1.set_ylim(0, max(throughputs) * 1.15)
 
     # --- Speedup ---
     setup_ax(ax2)
-    measured_speedup = [t / throughputs[0] for t in throughputs]
-    extrap_speedup = [tp / t1 for tp in extrap_tp]
+    t1_measured = throughputs[0]
+    measured_speedup = [t / t1_measured for t in throughputs]
+    fit_speedup = [tp / t1_measured for tp in fit_tp]
 
-    ax2.fill_between(extrap_threads, 0, extrap_speedup, color=EXTRAP, alpha=0.08, zorder=1)
-    ax2.plot(extrap_threads, extrap_speedup, '-', color=EXTRAP, linewidth=1.5, alpha=0.6, label="amdahl")
-    ax2.plot(extrap_threads, extrap_threads, '--', color=LINEAR, linewidth=1, label='linear')
-    ax2.plot(threads, measured_speedup, 'o-', color=TDG, linewidth=2,
-             markersize=6, markeredgecolor=PANEL, markeredgewidth=1.5,
-             label='measured', zorder=5)
-    ax2.axvline(x=max_measured, color=CALLOUT, linestyle=':', alpha=0.4, linewidth=0.8)
+    ax2.plot(fit_threads, fit_speedup, '-', color=EXTRAP, linewidth=1.5, alpha=0.6, label='amdahl+overhead')
+    ax2.scatter(threads, measured_speedup, color=TDG, s=30, zorder=5,
+                edgecolors=PANEL, linewidths=1.5, label='measured')
 
     ax2.set_xlabel('threads', fontsize=9)
     ax2.set_ylabel('speedup', fontsize=9)
     ax2.set_title('SPEEDUP', fontsize=11, fontweight='bold', color=TEXT, loc='left', pad=8)
-    ax2.legend(fontsize=8, facecolor=PANEL, edgecolor=BORDER, labelcolor=DIM)
-    ax2.set_xlim(0, 66)
-    ax2.set_ylim(0, max(extrap_speedup[:64]) * 1.15)
+    ax2.set_xlim(0, max_measured + 2)
+    ax2.set_ylim(0, max(max(measured_speedup), max(fit_speedup)) * 1.15)
 
-    fig.suptitle(f'tdg  /  core scaling  /  measured + extrapolated',
-                 fontsize=10, color=DIM, fontfamily='monospace', y=0.98)
-    fig.tight_layout(rect=[0, 0, 1, 0.95])
+    # Single shared legend below the figure
+    handles, labels = ax1.get_legend_handles_labels()
+    fig.legend(handles, labels, loc='lower center', ncol=2, fontsize=8,
+               facecolor=PANEL, edgecolor=BORDER, labelcolor=DIM)
+
+    meta = load_meta(output_dir)
+    subtitle = 'tdg  /  core scaling'
+    if meta.get('version'):
+        subtitle += f'  [{meta["version"]}]'
+    fig.suptitle(subtitle, fontsize=10, color=DIM, fontfamily='monospace', y=0.98)
+    fig.tight_layout(rect=[0, 0.06, 1, 0.95])
     fig.savefig(os.path.join(output_dir, 'bench-scaling.svg'), format='svg',
                 bbox_inches='tight', facecolor=BG)
     plt.close(fig)
 
     print(f"Scaling plot saved to {output_dir}/bench-scaling.svg")
-    print(f"Serial fraction: {s:.1%}, predicted {t1/(s+(1-s)/32):.0f} MB/s @ 32 cores")
+    peak_n = int(fit_threads[np.argmax(fit_tp)])
+    peak_tp = max(fit_tp)
+    print(f"Serial fraction: {s:.1%}, overhead: {c:.2e}/thread, peak {peak_tp:.0f} MB/s @ {peak_n} threads")
 
 if __name__ == '__main__':
     csv_path = sys.argv[1] if len(sys.argv) > 1 else 'bench/scaling.csv'

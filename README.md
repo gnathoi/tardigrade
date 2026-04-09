@@ -22,9 +22,9 @@
 
 # tardigrade
 
-Archive tool. Fast, checksummed, deduplicated.
+Self-healing archive tool. Fast, checksummed, deduplicated.
 
-`7x faster` than tar+zstd on source code | `78% smaller` with dedup | `1.5 GB/s` throughput
+`self-repairing` ECC by default | `1.9 GB/s` parallel throughput | `73% smaller` with dedup
 
 [![CI](https://github.com/gnathoi/tardigrade/actions/workflows/ci.yml/badge.svg)](https://github.com/gnathoi/tardigrade/actions/workflows/ci.yml)
 [![Release](https://github.com/gnathoi/tardigrade/actions/workflows/release.yml/badge.svg)](https://github.com/gnathoi/tardigrade/actions/workflows/release.yml)
@@ -36,21 +36,47 @@ Archive tool. Fast, checksummed, deduplicated.
 
 tar is 45 years old. No checksums, no dedup, no seekability, single-threaded compression, and a mess of incompatible extensions. tardigrade is fast, safe and efficient using the modern tools at our disposal. 
 
+## Self-healing archives
+
+Every archive includes Reed-Solomon erasure coding by default. Corrupt the bytes, tardigrade fixes itself:
+
+```bash
+# Create an archive
+tdg create photos.tg ./photos
+
+# Corrupt 50 bytes with a hex editor, dd, or bit rot
+dd if=/dev/urandom of=photos.tg bs=1 count=50 seek=200 conv=notrunc
+
+# Detect the damage
+tdg verify photos.tg
+# blocks 1/42 corrupted, 1 recoverable via ECC
+
+# Repair it
+tdg repair photos.tg
+# repaired 1 block (Reed-Solomon recovery)
+
+# Extract — original files restored perfectly
+tdg extract photos.tg -o ./restored
+```
+
+tar and zip have zero protection against bit rot. One flipped bit and your data is gone. tardigrade archives know how to heal themselves.
+
 ## Features
 
 **Speed**
-- **Up to 9x faster** — parallel zstd/lz4 via rayon, uses all cores
+- **Up to 2.6x faster** at scale — parallel zstd/lz4 via rayon, 1.9 GB/s on 64 logical cores
 - **.gitignore-aware** — skips `target/`, `node_modules/`, `.git/` automatically
 
 **Dedup & compression**
 - **Content-addressed dedup** — identical blocks stored once. 3 copies of `node_modules`, pay for 1
 - **Content-defined chunking** — FastCDC splits at content boundaries, dedup works across modified files
 
-**Integrity & recovery**
+**Self-healing archives**
+- **Reed-Solomon ECC on by default** — every archive can detect and repair its own corruption
 - **BLAKE3 checksums** — every block verified on read
-- **Reed-Solomon ECC** — `--ecc low|medium|high` erasure coding for data recovery
 - **`tdg verify`** — full integrity check with damage mapping
 - **`tdg repair`** — reconstruct corrupted blocks from ECC parity
+- Three levels: `low` (default, ~20% overhead), `medium` (~40%), `high` (~60%). Disable with `--ecc none`
 
 **Encryption**
 - **ChaCha20-Poly1305 AEAD** with passphrase key wrapping
@@ -138,10 +164,11 @@ tdg extract legacy.tar.gz -o ./restored
 # Convert tar to .tg (with dedup)
 tdg convert legacy.tar.zst output.tg
 
-# Reed-Solomon erasure coding
-tdg create --ecc low archive.tg ./data        # RS(10,2) ~20% overhead
+# Reed-Solomon erasure coding (on by default)
+tdg create archive.tg ./data                  # ECC low is the default
 tdg create --ecc medium archive.tg ./data     # RS(10,4) ~40% overhead
 tdg create --ecc high archive.tg ./data       # RS(10,6) ~60% overhead
+tdg create --ecc none archive.tg ./data        # disable ECC for smallest size
 
 # Self-update
 tdg update                                    # update to latest release
@@ -158,6 +185,7 @@ $ tdg create backup.tg ./my-project
   21.71 MiB -> 7.66 MiB  2.8x  zstd
   125 files, 11 dirs  127 blocks (123 unique)
   1.95 MiB saved by dedup (4 duplicate blocks eliminated)
+  ecc: RS(10,2) 13 parity blocks ~20% overhead
   0.03s  806 MB/s
 ```
 
@@ -182,7 +210,7 @@ $ tdg extract backup.tg -o ./restored
 
 ## Benchmarks
 
-Apple Silicon (M-series, 10 cores). Run locally: `bash bench/run-all.sh`
+AMD Threadripper PRO 5975WX (32 cores / 64 logical). Run locally: `bash bench/run-all.sh`
 
 ### Speed
 
@@ -194,29 +222,31 @@ Apple Silicon (M-series, 10 cores). Run locally: `bash bench/run-all.sh`
 
 ### Key Results
 
-Best of 5 runs, process time only:
+Best of 5 runs (best of 3 for 10 GB datasets), process time only:
 
 | Dataset | tdg create | tar+zstd | Speedup | tdg extract | tar+zstd | Speedup | Size savings |
 |---------|-----------|----------|---------|-------------|----------|---------|-------------|
-| Source project (5 MB, 270 files) | 14ms | 93ms | **6.6x** | 34ms | 90ms | **2.6x** | ~equal |
-| Heavy dedup (13 MB, shared deps) | 10ms | 87ms | **8.7x** | 27ms | 89ms | **3.3x** | **78% smaller** |
-| Large mixed (91 MB, logs+bins) | 41ms | 33ms | 0.8x | 39ms | 73ms | **1.9x** | **28% smaller** |
+| Source project (5 MB, 270 files) | 19ms | 29ms | **1.5x** | 21ms | 15ms | 0.7x | ~equal |
+| Heavy dedup (13 MB, shared deps) | 18ms | 25ms | **1.4x** | 18ms | 22ms | **1.2x** | **75% smaller** |
+| Large mixed (94 MB, logs+bins) | 95ms | 65ms | 0.7x | 69ms | 93ms | **1.3x** | **33% smaller** |
+| 10 GB mixed (10 GB, 1000 files) | 5.9s | 15.3s | **2.6x** | 10.8s | 8.6s | 0.8x | **23% smaller** |
+| 10 GB dedup (10 GB, backup snapshots) | 4.4s | 7.1s | **1.6x** | 5.4s | 8.0s | **1.5x** | **73% smaller** |
 
-### Core Scaling
+### Core Scaling (9.7 GB dataset, 64 logical cores)
 
 ![Core Scaling](bench/bench-scaling.svg)
 
-10 logical cores: ~1.5 GB/s. 32 logical cores (projected): ~1.8 GB/s. 64 logical cores (projected): ~1.9 GB/s. The serial fraction (~34%) is the dedup lookup + sequential write pass.
+Peak throughput: **1.9 GB/s at 28 threads**. Serial fraction: 22.5% (dedup lookup + sequential write pass). Performance plateaus around 28-36 threads, then declines slightly from memory bandwidth contention.
 
 ## When tardigrade wins
 
 tardigrade isn't always the fastest or smallest. Here's where it genuinely blows other methods out of the water, and where it doesn't.
 
 **Duplicate-heavy data (the sweet spot)**
-Monorepos, node_modules, Docker layers, CI artifacts, any dataset with repeated files or shared content. tar+zstd compresses each file independently and can't deduplicate across files. tardigrade's content-addressed blocks mean identical content is stored once regardless of where it appears. On the benchmark dedup dataset: **78% smaller** and **9x faster** than tar+zstd.
+Monorepos, node_modules, Docker layers, CI artifacts, any dataset with repeated files or shared content. tar+zstd compresses each file independently and can't deduplicate across files. tardigrade's content-addressed blocks mean identical content is stored once regardless of where it appears. At 10 GB with heavy dedup: **2.7 GB vs 10 GB** (73% smaller). Create is 1.6x faster, extract is 1.5x faster.
 
-**Source code and project backups**
-Lots of small text files. tardigrade skips FastCDC overhead for small files and parallelizes compression across all cores. On the benchmark source project (270 files, 5 MB): **7x faster** to create, **2.6x faster** to extract.
+**Large-scale archiving (10 GB+)**
+tardigrade's parallel pipeline shines at scale. On the 10 GB mixed dataset: **2.6x faster** to create than tar+zstd. The parallel walk + compression across all cores overcomes the per-file overhead at small sizes.
 
 **Long-term archival (data you can't lose)**
 Reed-Solomon ECC means your archive can detect and repair bit rot, flash degradation, and transmission errors. tar and zip have zero protection. One flipped bit and your data is gone. tardigrade archives heal themselves. No other single-file archiver does this by default.
@@ -225,7 +255,7 @@ Reed-Solomon ECC means your archive can detect and repair bit rot, flash degrada
 `tdg create --append` adds a new point-in-time snapshot to an existing archive. Shared blocks across snapshots are stored once. A week of daily snapshots costs barely more than a single full backup. borg and restic do this too, but they need a repository and daemon. tardigrade gives you a single portable file.
 
 **Where tar+zstd wins**
-Large datasets with no duplicate content (random binary data, unique media files). Both tools are I/O bound and tar+zstd's simpler pipeline has less overhead. On the benchmark large mixed dataset (91 MB, mostly random binaries): tar+zstd creates slightly faster. tardigrade still wins on extraction and compression ratio due to dedup on the duplicate portions.
+Small datasets with no duplicate content. At small file sizes (5 MB), tar+zstd's simpler single-threaded pipeline has less overhead. On the benchmark source project: tar+zstd extracts faster. At 91 MB with unique binary data, tar+zstd creates faster. tardigrade's strengths (dedup, parallel I/O, ECC) pay off at scale and with duplicates.
 
 ## Archive Format (.tg)
 
