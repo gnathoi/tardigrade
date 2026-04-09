@@ -76,6 +76,26 @@ impl CreateProgress {
         ));
     }
 
+    pub fn inc_read(&self, bytes: u64) {
+        self.main_bar.inc(bytes);
+        self.status_bar.set_message(format!(
+            "{} reading & compressing…",
+            style("○").dim(),
+        ));
+    }
+
+    pub fn start_write_phase(&self) {
+        self.main_bar.set_position(0);
+        self.main_bar.set_style(
+            ProgressStyle::with_template(
+                "  {bar:40.cyan/dark_gray} {percent:>3}%  {binary_bytes_per_sec:>12}  ETA {eta_precise}",
+            )
+            .unwrap()
+            .progress_chars("━━╸"),
+        );
+        self.main_bar.reset_eta();
+    }
+
     pub fn inc_compressed(&self, bytes: u64) {
         self.main_bar.inc(bytes);
 

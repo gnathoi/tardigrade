@@ -212,6 +212,7 @@ pub fn create_archive(
     let codec = opts.codec;
     let level = opts.level;
 
+    let progress_ref = &progress;
     let process_one =
         |(path, source, _size): &(std::path::PathBuf, std::path::PathBuf, u64)| -> Result<ProcessedFile> {
             let file_entry = capture_metadata(path, source)?;
@@ -219,7 +220,12 @@ pub fn create_archive(
             let chunks = match &file_entry.file_type {
                 FileType::File => {
                     let data = fs::read(path).map_err(|e| Error::io_path(path, e))?;
-                    process_file_data(&data, codec, level)?
+                    let len = data.len() as u64;
+                    let chunks = process_file_data(&data, codec, level)?;
+                    if let Some(p) = progress_ref {
+                        p.inc_read(len);
+                    }
+                    chunks
                 }
                 _ => vec![],
             };
@@ -234,6 +240,9 @@ pub fn create_archive(
     let processed: Vec<Result<ProcessedFile>> = walk_entries.par_iter().map(process_one).collect();
 
     // Phase 3: Sequential write with dedup
+    if let Some(ref p) = progress {
+        p.start_write_phase();
+    }
     let file = File::create(archive_path).map_err(|e| Error::io_path(archive_path, e))?;
     let mut writer = BufWriter::with_capacity(WRITE_BUFFER_SIZE, file);
 
