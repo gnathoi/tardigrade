@@ -46,7 +46,7 @@ impl CreateProgress {
         // Main progress bar — uses a custom template without indicatif's ETA
         // (we compute our own stable linear ETA instead)
         let main_style = ProgressStyle::with_template(
-            "  {bar:40.green/dark_gray} {percent:>3}%  {binary_bytes_per_sec:>12}  {msg}",
+            "  {bar:40.green/dark_gray} {percent:>3}%  {binary_bytes_per_sec:>12}  {elapsed_precise}  {msg}",
         )
         .unwrap()
         .progress_chars("━━╸");
