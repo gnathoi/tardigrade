@@ -113,13 +113,14 @@ fn extract_tar<R: Read>(reader: R, dest: &Path) -> Result<LegacyExtractStats> {
         let entry_type = entry.header().entry_type();
         match entry_type {
             tar::EntryType::Directory => {
-                std::fs::create_dir_all(dest.join(&path)).ok();
+                let dir = dest.join(&path);
+                std::fs::create_dir_all(&dir).map_err(|e| Error::io_path(&dir, e))?;
                 stats.dir_count += 1;
             }
             tar::EntryType::Regular | tar::EntryType::GNUSparse => {
                 let target = dest.join(&path);
                 if let Some(parent) = target.parent() {
-                    std::fs::create_dir_all(parent).ok();
+                    std::fs::create_dir_all(parent).map_err(|e| Error::io_path(parent, e))?;
                 }
                 entry
                     .unpack(&target)
@@ -131,11 +132,16 @@ fn extract_tar<R: Read>(reader: R, dest: &Path) -> Result<LegacyExtractStats> {
                 #[cfg(unix)]
                 {
                     let target = dest.join(&path);
-                    if let Some(link_target) = entry.link_name().ok().flatten() {
+                    if let Some(link_target) = entry
+                        .link_name()
+                        .map_err(|e| Error::InvalidArchive(format!("tar link: {e}")))?
+                    {
                         if let Some(parent) = target.parent() {
-                            std::fs::create_dir_all(parent).ok();
+                            std::fs::create_dir_all(parent)
+                                .map_err(|e| Error::io_path(parent, e))?;
                         }
-                        std::os::unix::fs::symlink(&*link_target, &target).ok();
+                        std::os::unix::fs::symlink(&*link_target, &target)
+                            .map_err(|e| Error::io_path(&target, e))?;
                     }
                 }
                 stats.file_count += 1;
