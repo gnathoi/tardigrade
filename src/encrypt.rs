@@ -10,18 +10,24 @@ use crate::format::Hash;
 /// Symmetric key for archive encryption (256-bit)
 pub type SymmetricKey = [u8; 32];
 
-/// Derive a symmetric key from a passphrase using scrypt
+/// Derive a symmetric key from a passphrase using Argon2id.
+/// Parameters: 64 MB memory, 3 iterations, 1 lane.
+/// This is memory-hard, making GPU/ASIC brute-force attacks impractical.
 pub fn derive_key_from_passphrase(passphrase: &[u8], salt: &[u8; 16]) -> SymmetricKey {
-    use blake3::Hasher;
-    // Simple key derivation: BLAKE3(salt || passphrase || salt)
-    // For production, use scrypt or argon2. This is a reasonable
-    // starting point that's fast and deterministic.
-    let mut hasher = Hasher::new_derive_key("tardigrade-archive-key-v1");
-    hasher.update(salt);
-    hasher.update(passphrase);
-    hasher.update(salt);
+    use argon2::Argon2;
+
+    // Argon2id with 64 MB memory cost, 3 iterations, 1 parallel lane.
+    // OWASP minimum recommendation. Balances security vs. archive open time.
+    let argon2 = Argon2::new(
+        argon2::Algorithm::Argon2id,
+        argon2::Version::V0x13,
+        argon2::Params::new(64 * 1024, 3, 1, Some(32)).expect("valid argon2 params"),
+    );
+
     let mut key = [0u8; 32];
-    hasher.finalize_xof().fill(&mut key);
+    argon2
+        .hash_password_into(passphrase, salt, &mut key)
+        .expect("argon2 key derivation");
     key
 }
 
@@ -71,7 +77,7 @@ pub fn decrypt_block(
 /// Written after the archive header when encryption is enabled.
 ///
 /// Format:
-///   salt: [u8; 16]       — scrypt salt for passphrase-based decryption
+///   salt: [u8; 16]       — Argon2id salt for passphrase-based decryption
 ///   encrypted_key: [u8; 48] — ChaCha20-Poly1305(key, derived_wrapping_key)
 pub struct KeyEncapsulation {
     pub salt: [u8; 16],
