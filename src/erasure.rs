@@ -42,6 +42,11 @@ impl EccLevel {
         }
     }
 
+    /// Returns true if the string explicitly disables ECC.
+    pub fn is_none(s: &str) -> bool {
+        matches!(s.to_lowercase().as_str(), "none" | "off" | "false")
+    }
+
     pub fn total_shards(&self) -> usize {
         self.data_shards + self.parity_shards
     }
@@ -169,6 +174,17 @@ mod tests {
         assert!(EccLevel::from_str("medium").is_some());
         assert!(EccLevel::from_str("high").is_some());
         assert!(EccLevel::from_str("invalid").is_none());
+    }
+
+    #[test]
+    fn ecc_is_none() {
+        assert!(EccLevel::is_none("none"));
+        assert!(EccLevel::is_none("off"));
+        assert!(EccLevel::is_none("false"));
+        assert!(EccLevel::is_none("NONE"));
+        assert!(!EccLevel::is_none("low"));
+        assert!(!EccLevel::is_none("medium"));
+        assert!(!EccLevel::is_none("high"));
     }
 
     #[test]

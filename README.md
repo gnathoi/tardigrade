@@ -22,9 +22,9 @@
 
 # tardigrade
 
-Archive tool. Fast, checksummed, deduplicated.
+Self-healing archive tool. Fast, checksummed, deduplicated.
 
-`1.9 GB/s` parallel throughput | `73% smaller` with dedup | checksummed & encrypted
+`self-repairing` ECC by default | `1.9 GB/s` parallel throughput | `73% smaller` with dedup
 
 [![CI](https://github.com/gnathoi/tardigrade/actions/workflows/ci.yml/badge.svg)](https://github.com/gnathoi/tardigrade/actions/workflows/ci.yml)
 [![Release](https://github.com/gnathoi/tardigrade/actions/workflows/release.yml/badge.svg)](https://github.com/gnathoi/tardigrade/actions/workflows/release.yml)
@@ -36,6 +36,31 @@ Archive tool. Fast, checksummed, deduplicated.
 
 tar is 45 years old. No checksums, no dedup, no seekability, single-threaded compression, and a mess of incompatible extensions. tardigrade is fast, safe and efficient using the modern tools at our disposal. 
 
+## Self-healing archives
+
+Every archive includes Reed-Solomon erasure coding by default. Corrupt the bytes, tardigrade fixes itself:
+
+```bash
+# Create an archive
+tdg create photos.tg ./photos
+
+# Corrupt 50 bytes with a hex editor, dd, or bit rot
+dd if=/dev/urandom of=photos.tg bs=1 count=50 seek=200 conv=notrunc
+
+# Detect the damage
+tdg verify photos.tg
+# blocks 1/42 corrupted, 1 recoverable via ECC
+
+# Repair it
+tdg repair photos.tg
+# repaired 1 block (Reed-Solomon recovery)
+
+# Extract — original files restored perfectly
+tdg extract photos.tg -o ./restored
+```
+
+tar and zip have zero protection against bit rot. One flipped bit and your data is gone. tardigrade archives know how to heal themselves.
+
 ## Features
 
 **Speed**
@@ -46,11 +71,12 @@ tar is 45 years old. No checksums, no dedup, no seekability, single-threaded com
 - **Content-addressed dedup** — identical blocks stored once. 3 copies of `node_modules`, pay for 1
 - **Content-defined chunking** — FastCDC splits at content boundaries, dedup works across modified files
 
-**Integrity & recovery**
+**Self-healing archives**
+- **Reed-Solomon ECC on by default** — every archive can detect and repair its own corruption
 - **BLAKE3 checksums** — every block verified on read
-- **Reed-Solomon ECC** — `--ecc low|medium|high` erasure coding for data recovery
 - **`tdg verify`** — full integrity check with damage mapping
 - **`tdg repair`** — reconstruct corrupted blocks from ECC parity
+- Three levels: `low` (default, ~20% overhead), `medium` (~40%), `high` (~60%). Disable with `--ecc none`
 
 **Encryption**
 - **ChaCha20-Poly1305 AEAD** with passphrase key wrapping
@@ -138,10 +164,11 @@ tdg extract legacy.tar.gz -o ./restored
 # Convert tar to .tg (with dedup)
 tdg convert legacy.tar.zst output.tg
 
-# Reed-Solomon erasure coding
-tdg create --ecc low archive.tg ./data        # RS(10,2) ~20% overhead
+# Reed-Solomon erasure coding (on by default)
+tdg create archive.tg ./data                  # ECC low is the default
 tdg create --ecc medium archive.tg ./data     # RS(10,4) ~40% overhead
 tdg create --ecc high archive.tg ./data       # RS(10,6) ~60% overhead
+tdg create --ecc none archive.tg ./data        # disable ECC for smallest size
 
 # Self-update
 tdg update                                    # update to latest release
@@ -158,6 +185,7 @@ $ tdg create backup.tg ./my-project
   21.71 MiB -> 7.66 MiB  2.8x  zstd
   125 files, 11 dirs  127 blocks (123 unique)
   1.95 MiB saved by dedup (4 duplicate blocks eliminated)
+  ecc: RS(10,2) 13 parity blocks ~20% overhead
   0.03s  806 MB/s
 ```
 

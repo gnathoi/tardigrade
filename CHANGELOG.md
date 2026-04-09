@@ -2,6 +2,18 @@
 
 All notable changes to tardigrade will be documented in this file.
 
+## [0.5.7] - 2026-04-09
+
+### Changed
+- Reed-Solomon ECC is now on by default. Every archive can detect and repair its own corruption out of the box. Use `--ecc none` to disable.
+- `--ecc` flag accepts `none|low|medium|high` (default: `low`). Replaces the old opt-in `--ecc low|medium|high`.
+- `--append` and `--incremental` now respect the ECC default (previously silently created archives without ECC).
+
+### Added
+- `EccLevel::is_none()` for unified ECC disable detection (`none`, `off`, `false`).
+- README: self-healing demo section showing corruption, detection, repair, and recovery.
+- Integration tests for `--ecc none` and default ECC behavior.
+
 ## [0.5.2] - 2026-04-09
 
 ### Fixed
