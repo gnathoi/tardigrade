@@ -780,6 +780,88 @@ fn cli_ecc_flag() {
     );
 }
 
+#[test]
+fn cli_ecc_none_disables() {
+    let tmp = TempDir::new().unwrap();
+    let src = tmp.path().join("src");
+    fs::create_dir_all(&src).unwrap();
+    fs::write(src.join("data.txt"), "no ecc test data").unwrap();
+
+    let archive = tmp.path().join("no_ecc.tg");
+    let output = tdg()
+        .args([
+            "create",
+            "--ecc",
+            "none",
+            archive.to_str().unwrap(),
+            src.to_str().unwrap(),
+            "-q",
+        ])
+        .output()
+        .unwrap();
+    assert!(output.status.success());
+
+    // Info should show no erasure-coded flag
+    let output = tdg()
+        .args(["info", archive.to_str().unwrap()])
+        .output()
+        .unwrap();
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    assert!(
+        !stdout.contains("erasure-coded"),
+        "archive should NOT have erasure-coded flag with --ecc none"
+    );
+
+    // Should still extract fine
+    let dest = tmp.path().join("extracted");
+    let output = tdg()
+        .args([
+            "extract",
+            archive.to_str().unwrap(),
+            "-o",
+            dest.to_str().unwrap(),
+        ])
+        .output()
+        .unwrap();
+    assert!(output.status.success());
+    assert_eq!(
+        fs::read_to_string(dest.join("data.txt")).unwrap(),
+        "no ecc test data"
+    );
+}
+
+#[test]
+fn cli_default_creates_ecc() {
+    let tmp = TempDir::new().unwrap();
+    let src = tmp.path().join("src");
+    fs::create_dir_all(&src).unwrap();
+    fs::write(src.join("data.txt"), "default ecc test").unwrap();
+
+    let archive = tmp.path().join("default.tg");
+    // No --ecc flag at all — should default to low
+    let output = tdg()
+        .args([
+            "create",
+            archive.to_str().unwrap(),
+            src.to_str().unwrap(),
+            "-q",
+        ])
+        .output()
+        .unwrap();
+    assert!(output.status.success());
+
+    // Info should show erasure-coded flag
+    let output = tdg()
+        .args(["info", archive.to_str().unwrap()])
+        .output()
+        .unwrap();
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    assert!(
+        stdout.contains("erasure-coded"),
+        "default archive should have erasure-coded flag"
+    );
+}
+
 // ─── ECC: create + extract + verify + info + repair ───────────────────────
 
 #[test]

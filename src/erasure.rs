@@ -177,6 +177,17 @@ mod tests {
     }
 
     #[test]
+    fn ecc_is_none() {
+        assert!(EccLevel::is_none("none"));
+        assert!(EccLevel::is_none("off"));
+        assert!(EccLevel::is_none("false"));
+        assert!(EccLevel::is_none("NONE"));
+        assert!(!EccLevel::is_none("low"));
+        assert!(!EccLevel::is_none("medium"));
+        assert!(!EccLevel::is_none("high"));
+    }
+
+    #[test]
     fn overhead_percentages() {
         assert!((EccLevel::LOW.overhead_percent() - 20.0).abs() < 0.1);
         assert!((EccLevel::MEDIUM.overhead_percent() - 40.0).abs() < 0.1);
