@@ -24,7 +24,7 @@
 
 Archive tool. Fast, checksummed, deduplicated.
 
-`11x faster` than tar+zstd on source code | `78% smaller` with dedup | `2 GB/s` throughput
+`1.5 GB/s` parallel throughput | `76% smaller` with dedup | checksummed & encrypted
 
 [![CI](https://github.com/gnathoi/tardigrade/actions/workflows/ci.yml/badge.svg)](https://github.com/gnathoi/tardigrade/actions/workflows/ci.yml)
 [![Release](https://github.com/gnathoi/tardigrade/actions/workflows/release.yml/badge.svg)](https://github.com/gnathoi/tardigrade/actions/workflows/release.yml)
@@ -182,7 +182,7 @@ $ tdg extract backup.tg -o ./restored
 
 ## Benchmarks
 
-Apple Silicon (M-series, 10 cores). Run locally: `bash bench/run-all.sh`
+AMD Threadripper PRO 5975WX (64 cores). Run locally: `bash bench/run-all.sh`
 
 ### Speed
 
@@ -198,19 +198,17 @@ Best of 5 runs, process time only:
 
 | Dataset | tdg create | tar+zstd | Speedup | tdg extract | tar+zstd | Speedup | Size savings |
 |---------|-----------|----------|---------|-------------|----------|---------|-------------|
-| Source project (5 MB, 270 files) | 8ms | 91ms | **11.4x** | 34ms | 89ms | **2.6x** | ~equal |
-| Heavy dedup (13 MB, shared deps) | 9ms | 89ms | **9.9x** | 28ms | 93ms | **3.3x** | **78% smaller** |
-| Large mixed (94 MB, logs+bins) | 31ms | 35ms | **1.1x** | 39ms | 72ms | **1.8x** | **29% smaller** |
+| Source project (5 MB, 270 files) | 19ms | 28ms | **1.5x** | 21ms | 14ms | 0.7x | ~equal |
+| Heavy dedup (13 MB, shared deps) | 18ms | 26ms | **1.4x** | 17ms | 20ms | **1.2x** | **76% smaller** |
+| Large mixed (94 MB, logs+bins) | 93ms | 62ms | 0.7x | 70ms | 89ms | **1.3x** | **33% smaller** |
 
-tardigrade wins big on source code, projects with shared dependencies, anything with duplicate content. Parallel compression + dedup + skipping FastCDC for small files = 10x faster for typical developer workloads.
+tardigrade's strength is dedup — projects with shared dependencies or duplicate content compress to a fraction of what tar+zstd produces. Extract speed is competitive or faster. On large unique binary data, both tools are I/O bound and roughly equal.
 
-Large unique binary data is roughly equal. Both tools are I/O bound.
-
-### Core Scaling
+### Core Scaling (7.6 GB dataset)
 
 ![Core Scaling](bench/bench-scaling.svg)
 
-10 cores: ~2 GB/s. 32 cores (projected): ~2.2 GB/s. The serial fraction (~34%) is the dedup lookup + sequential write pass.
+Peak throughput: **1.5 GB/s at 36 threads**. Serial fraction: 23.1% (dedup lookup + sequential write pass). Performance is flat from 28–36 threads, then declines slightly from memory bandwidth contention beyond 40 threads.
 
 ## Archive Format (.tg)
 
