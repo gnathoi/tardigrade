@@ -27,7 +27,6 @@ impl ProgressStats {
     }
 }
 
-const PULSE_FRAMES: &[&str] = &["⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏"];
 
 /// Progress display for archive creation
 pub struct CreateProgress {
@@ -38,7 +37,6 @@ pub struct CreateProgress {
     start: Instant,
     total_bytes: u64,
     finishing: Arc<AtomicBool>,
-    pulse_idx: AtomicU64,
 }
 
 impl CreateProgress {
@@ -57,12 +55,17 @@ impl CreateProgress {
         main_bar.set_style(main_style);
         main_bar.enable_steady_tick(Duration::from_millis(80));
 
-        // Status line below
-        let status_style = ProgressStyle::with_template("  {msg}").unwrap();
+        // Status line — uses {spinner} which animates via steady_tick automatically
+        let status_style = ProgressStyle::with_template("  {spinner:.cyan} {msg}")
+            .unwrap()
+            .tick_strings(&[
+                "⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏", "",
+            ]);
 
         let status_bar = multi.add(ProgressBar::new_spinner());
         status_bar.set_style(status_style);
-        status_bar.enable_steady_tick(Duration::from_millis(200));
+        status_bar.set_message(format!("{}", style("compressing…").dim()));
+        status_bar.enable_steady_tick(Duration::from_millis(80));
 
         Self {
             _multi: multi,
@@ -72,13 +75,7 @@ impl CreateProgress {
             start: Instant::now(),
             total_bytes,
             finishing: Arc::new(AtomicBool::new(false)),
-            pulse_idx: AtomicU64::new(0),
         }
-    }
-
-    fn pulse_char(&self) -> &'static str {
-        let idx = self.pulse_idx.fetch_add(1, Ordering::Relaxed) as usize % PULSE_FRAMES.len();
-        PULSE_FRAMES[idx]
     }
 
     /// Called from rayon threads as each file is read + compressed.
@@ -103,11 +100,8 @@ impl CreateProgress {
         let elapsed = self.start.elapsed();
         let fraction = processed as f64 / self.total_bytes.max(1) as f64;
 
-        // Before 10%: show pulsing spinner instead of unreliable ETA
+        // Before 10%: no ETA yet (too unreliable), bar + spinner are enough
         if fraction < 0.10 {
-            let pulse = self.pulse_char();
-            self.main_bar
-                .set_message(format!("{}", style(pulse).cyan()));
             return;
         }
 
@@ -135,52 +129,29 @@ impl CreateProgress {
         // no-op: scan stats no longer shown during progress
     }
 
-    /// Update the status line with pulsing animation.
+    /// Update the status line. The spinner animates automatically via steady_tick.
     pub fn inc_compressed(&self, _bytes: u64) {
-        let pulse = self.pulse_char();
-        self.status_bar.set_message(format!(
-            "{}  {}",
-            style(pulse).cyan(),
-            style("compressing…").dim(),
-        ));
+        // Status bar spinner + message animate automatically, nothing to do here
     }
 
     /// Transition to "finishing" state — replace bar + ETA with a pulsing animation
     pub fn start_finishing(&self) {
         self.finishing.store(true, Ordering::Relaxed);
 
-        // Switch main bar to a simple message style
-        let bar_style = ProgressStyle::with_template("  {msg}").unwrap();
-        self.main_bar.set_style(bar_style);
-        self.main_bar.set_message(format!(
-            "{}  {}",
-            style("⠋").cyan(),
-            style("finishing up…").dim()
-        ));
+        // Switch main bar to a spinner style for the finishing phase
+        let finish_style = ProgressStyle::with_template("  {spinner:.cyan} {msg}")
+            .unwrap()
+            .tick_strings(&[
+                "⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏", "",
+            ]);
+        self.main_bar.set_style(finish_style);
+        self.main_bar
+            .set_message(format!("{}", style("finishing up…").dim()));
         self.status_bar.set_message(String::new());
-
-        // Animate the finishing spinner in a background thread
-        let bar = self.main_bar.clone();
-        let finishing = self.finishing.clone();
-        std::thread::spawn(move || {
-            let mut idx = 0usize;
-            while finishing.load(Ordering::Relaxed) {
-                let frame = PULSE_FRAMES[idx % PULSE_FRAMES.len()];
-                bar.set_message(format!(
-                    "{}  {}",
-                    style(frame).cyan(),
-                    style("finishing up…").dim()
-                ));
-                std::thread::sleep(Duration::from_millis(80));
-                idx += 1;
-            }
-        });
     }
 
     pub fn finish(&self) {
         self.finishing.store(false, Ordering::Relaxed);
-        // Small sleep to let the spinner thread notice and exit
-        std::thread::sleep(Duration::from_millis(100));
         self.main_bar.finish_and_clear();
         self.status_bar.finish_and_clear();
     }

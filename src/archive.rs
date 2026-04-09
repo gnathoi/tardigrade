@@ -171,34 +171,79 @@ pub fn create_archive(
     sources: &[&Path],
     opts: &CreateOptions,
 ) -> Result<CreateStats> {
-    // Phase 1: Walk and collect file paths + sizes (single stat per file)
-    let mut walk_entries: Vec<(std::path::PathBuf, std::path::PathBuf, u64)> = Vec::new();
-    let mut total_bytes: u64 = 0;
+    // Phase 1: Walk and collect file paths + sizes (parallel walk)
+    let walk_entries: Vec<(std::path::PathBuf, std::path::PathBuf, u64)>;
+    let total_bytes: u64;
 
-    for source in sources {
-        let walker = WalkBuilder::new(source)
-            .git_ignore(opts.respect_gitignore)
-            .git_global(opts.respect_gitignore)
-            .git_exclude(opts.respect_gitignore)
-            .hidden(false)
-            .filter_entry(|e| {
-                !(e.file_type().is_some_and(|ft| ft.is_dir()) && e.file_name() == ".git")
-            })
-            .follow_links(false)
-            .build();
+    {
+        use std::sync::Mutex;
+        use std::sync::atomic::AtomicU64;
 
-        for entry in walker {
-            let entry = entry.map_err(|e| Error::IoPath {
-                path: source.to_path_buf(),
-                source: std::io::Error::other(e),
-            })?;
-            let path = entry.path().to_path_buf();
-            // Get size during walk — avoids a second stat() later
-            let size = entry.metadata().map(|m| m.len()).unwrap_or(0);
-            if entry.file_type().is_some_and(|ft| ft.is_file()) {
-                total_bytes += size;
-            }
-            walk_entries.push((path, source.to_path_buf(), size));
+        // Show scanning spinner if progress is enabled
+        let scan_spinner = if opts.show_progress {
+            let sp = indicatif::ProgressBar::new_spinner();
+            sp.set_style(
+                indicatif::ProgressStyle::with_template("  {spinner} {msg}")
+                    .unwrap()
+                    .tick_strings(&["⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏", ""]),
+            );
+            sp.enable_steady_tick(std::time::Duration::from_millis(80));
+            sp.set_message("scanning…");
+            Some(sp)
+        } else {
+            None
+        };
+
+        let entries = Mutex::new(Vec::new());
+        let bytes = AtomicU64::new(0);
+        let file_count = AtomicU64::new(0);
+
+        for source in sources {
+            let source_path = source.to_path_buf();
+            let walker = WalkBuilder::new(source)
+                .git_ignore(opts.respect_gitignore)
+                .git_global(opts.respect_gitignore)
+                .git_exclude(opts.respect_gitignore)
+                .hidden(false)
+                .threads(rayon::current_num_threads().max(4))
+                .filter_entry(|e| {
+                    !(e.file_type().is_some_and(|ft| ft.is_dir()) && e.file_name() == ".git")
+                })
+                .follow_links(false)
+                .build_parallel();
+
+            walker.run(|| {
+                let entries = &entries;
+                let bytes = &bytes;
+                let file_count = &file_count;
+                let source_path = &source_path;
+                let scan_spinner = &scan_spinner;
+                Box::new(move |result| {
+                    let entry = match result {
+                        Ok(e) => e,
+                        Err(_) => return ignore::WalkState::Continue,
+                    };
+                    let path = entry.path().to_path_buf();
+                    let size = entry.metadata().map(|m| m.len()).unwrap_or(0);
+                    if entry.file_type().is_some_and(|ft| ft.is_file()) {
+                        bytes.fetch_add(size, Ordering::Relaxed);
+                        let count = file_count.fetch_add(1, Ordering::Relaxed) + 1;
+                        if let Some(sp) = scan_spinner
+                            && count.is_multiple_of(1000) {
+                                sp.set_message(format!("scanning… {} files", count));
+                            }
+                    }
+                    entries.lock().unwrap().push((path, source_path.clone(), size));
+                    ignore::WalkState::Continue
+                })
+            });
+        }
+
+        walk_entries = entries.into_inner().unwrap();
+        total_bytes = bytes.load(Ordering::Relaxed);
+
+        if let Some(sp) = scan_spinner {
+            sp.finish_and_clear();
         }
     }
 
