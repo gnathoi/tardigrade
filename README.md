@@ -64,7 +64,7 @@ tar and zip have zero protection against bit rot. One flipped bit and your data 
 ## Features
 
 **Speed**
-- **11x faster** — parallel zstd/lz4 via rayon, uses all cores
+- **Up to 2.6x faster** at scale — parallel zstd/lz4 via rayon, 1.9 GB/s on 64 logical cores
 - **.gitignore-aware** — skips `target/`, `node_modules/`, `.git/` automatically
 
 **Dedup & compression**
@@ -210,7 +210,7 @@ $ tdg extract backup.tg -o ./restored
 
 ## Benchmarks
 
-AMD Threadripper PRO 5975WX (64 cores). Run locally: `bash bench/run-all.sh`
+AMD Threadripper PRO 5975WX (32 cores / 64 logical). Run locally: `bash bench/run-all.sh`
 
 ### Speed
 
@@ -234,11 +234,30 @@ Best of 5 runs (best of 3 for 10 GB datasets), process time only:
 
 tardigrade's strength is dedup — backup snapshots, container layers, anything with duplicate content compresses to a fraction of what tar+zstd produces. At 10 GB with heavy dedup: **2.7 GB vs 10 GB**. Create speed scales well on large datasets (2.6x at 10 GB). On large unique binary data, both tools are I/O bound.
 
-### Core Scaling (9.7 GB dataset)
+### Core Scaling (9.7 GB dataset, 64 logical cores)
 
 ![Core Scaling](bench/bench-scaling.svg)
 
-Peak throughput: **1.9 GB/s at 28 threads**. Serial fraction: 22.5% (dedup lookup + sequential write pass). Performance plateaus around 28–36 threads, then declines slightly from memory bandwidth contention.
+Peak throughput: **1.9 GB/s at 28 threads**. Serial fraction: 22.5% (dedup lookup + sequential write pass). Performance plateaus around 28-36 threads, then declines slightly from memory bandwidth contention.
+
+## When tardigrade wins
+
+tardigrade isn't always the fastest or smallest. Here's where it genuinely blows other methods out of the water, and where it doesn't.
+
+**Duplicate-heavy data (the sweet spot)**
+Monorepos, node_modules, Docker layers, CI artifacts, any dataset with repeated files or shared content. tar+zstd compresses each file independently and can't deduplicate across files. tardigrade's content-addressed blocks mean identical content is stored once regardless of where it appears. At 10 GB with heavy dedup: **2.7 GB vs 10 GB** (73% smaller). Create is 1.6x faster, extract is 1.5x faster.
+
+**Large-scale archiving (10 GB+)**
+tardigrade's parallel pipeline shines at scale. On the 10 GB mixed dataset: **2.6x faster** to create than tar+zstd. The parallel walk + compression across all cores overcomes the per-file overhead at small sizes.
+
+**Long-term archival (data you can't lose)**
+Reed-Solomon ECC means your archive can detect and repair bit rot, flash degradation, and transmission errors. tar and zip have zero protection. One flipped bit and your data is gone. tardigrade archives heal themselves. No other single-file archiver does this by default.
+
+**Temporal backups with dedup**
+`tdg create --append` adds a new point-in-time snapshot to an existing archive. Shared blocks across snapshots are stored once. A week of daily snapshots costs barely more than a single full backup. borg and restic do this too, but they need a repository and daemon. tardigrade gives you a single portable file.
+
+**Where tar+zstd wins**
+Small datasets with no duplicate content. At small file sizes (5 MB), tar+zstd's simpler single-threaded pipeline has less overhead. On the benchmark source project: tar+zstd extracts faster. At 91 MB with unique binary data, tar+zstd creates faster. tardigrade's strengths (dedup, parallel I/O, ECC) pay off at scale and with duplicates.
 
 ## Archive Format (.tg)
 
