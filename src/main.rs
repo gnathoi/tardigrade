@@ -54,8 +54,21 @@ fn main() {
             incremental: incremental_base,
             ecc,
         } => {
+            let ecc = if erasure::EccLevel::is_none(&ecc) {
+                None
+            } else {
+                Some(ecc)
+            };
             if append {
-                cmd_append(&archive, &paths, &codec_name, level, no_ignore, cli.quiet)
+                cmd_append(
+                    &archive,
+                    &paths,
+                    &codec_name,
+                    level,
+                    no_ignore,
+                    ecc.clone(),
+                    cli.quiet,
+                )
             } else if let Some(base) = incremental_base {
                 cmd_create_incremental(
                     &base,
@@ -64,6 +77,7 @@ fn main() {
                     &codec_name,
                     level,
                     no_ignore,
+                    ecc.clone(),
                     cli.quiet,
                 )
             } else {
@@ -274,9 +288,19 @@ fn cmd_append(
     codec_name: &str,
     level: i32,
     no_ignore: bool,
+    ecc: Option<String>,
     quiet: bool,
 ) -> error::Result<()> {
     let codec = compress::codec_from_str(codec_name)?;
+
+    let ecc_level = if let Some(ref ecc_str) = ecc {
+        Some(
+            erasure::EccLevel::from_str(ecc_str)
+                .ok_or_else(|| error::Error::Ecc(format!("unknown ECC level: {ecc_str}")))?,
+        )
+    } else {
+        None
+    };
 
     let opts = archive::CreateOptions {
         codec,
@@ -284,7 +308,7 @@ fn cmd_append(
         show_progress: !quiet,
         respect_gitignore: !no_ignore,
         passphrase: None,
-        ecc_level: None,
+        ecc_level,
     };
 
     let source_refs: Vec<&std::path::Path> = paths.iter().map(|p| p.as_path()).collect();
@@ -326,6 +350,7 @@ fn cmd_append(
     Ok(())
 }
 
+#[allow(clippy::too_many_arguments)]
 fn cmd_create_incremental(
     base: &Path,
     archive: &Path,
@@ -333,9 +358,19 @@ fn cmd_create_incremental(
     codec_name: &str,
     level: i32,
     no_ignore: bool,
+    ecc: Option<String>,
     quiet: bool,
 ) -> error::Result<()> {
     let codec = compress::codec_from_str(codec_name)?;
+
+    let ecc_level = if let Some(ref ecc_str) = ecc {
+        Some(
+            erasure::EccLevel::from_str(ecc_str)
+                .ok_or_else(|| error::Error::Ecc(format!("unknown ECC level: {ecc_str}")))?,
+        )
+    } else {
+        None
+    };
 
     let opts = archive::CreateOptions {
         codec,
@@ -343,7 +378,7 @@ fn cmd_create_incremental(
         show_progress: !quiet,
         respect_gitignore: !no_ignore,
         passphrase: None,
-        ecc_level: None,
+        ecc_level,
     };
 
     let source_refs: Vec<&std::path::Path> = paths.iter().map(|p| p.as_path()).collect();
