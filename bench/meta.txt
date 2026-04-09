@@ -1,4 +1,4 @@
-version=tdg 0.5.6
-date=2026-04-09T19:15:28Z
+version=tdg 0.5.7
+date=2026-04-09T20:22:33Z
 host=x86_64/Linux
 cores=64
