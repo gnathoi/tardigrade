@@ -88,9 +88,6 @@ def plot(csv_path, output_dir):
 
     # --- Throughput ---
     setup_ax(ax1)
-    linear_threads = np.linspace(1, max_measured, 200)
-    ax1.plot(linear_threads, [t1*n for n in linear_threads], '--',
-             color=LINEAR, linewidth=1, label='linear')
     ax1.plot(fit_threads, fit_tp, '-', color=EXTRAP, linewidth=1.5, alpha=0.6,
              label=f"amdahl+overhead (s={s:.0%})")
     ax1.scatter(threads, throughputs, color=TDG, s=30, zorder=5,
@@ -104,10 +101,10 @@ def plot(csv_path, output_dir):
 
     # --- Speedup ---
     setup_ax(ax2)
-    measured_speedup = [t / throughputs[0] for t in throughputs]
-    fit_speedup = [tp / t1 for tp in fit_tp]
+    t1_measured = throughputs[0]
+    measured_speedup = [t / t1_measured for t in throughputs]
+    fit_speedup = [tp / t1_measured for tp in fit_tp]
 
-    ax2.plot(linear_threads, linear_threads, '--', color=LINEAR, linewidth=1, label='linear')
     ax2.plot(fit_threads, fit_speedup, '-', color=EXTRAP, linewidth=1.5, alpha=0.6, label='amdahl+overhead')
     ax2.scatter(threads, measured_speedup, color=TDG, s=30, zorder=5,
                 edgecolors=PANEL, linewidths=1.5, label='measured')
@@ -120,7 +117,7 @@ def plot(csv_path, output_dir):
 
     # Single shared legend below the figure
     handles, labels = ax1.get_legend_handles_labels()
-    fig.legend(handles, labels, loc='lower center', ncol=3, fontsize=8,
+    fig.legend(handles, labels, loc='lower center', ncol=2, fontsize=8,
                facecolor=PANEL, edgecolor=BORDER, labelcolor=DIM)
 
     meta = load_meta(output_dir)
