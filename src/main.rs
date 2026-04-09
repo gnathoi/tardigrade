@@ -1,4 +1,5 @@
 mod archive;
+mod block;
 mod chunk;
 mod cli;
 mod compat;

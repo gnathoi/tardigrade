@@ -9,28 +9,23 @@
 
 use std::collections::HashMap;
 use std::fs::{self, File};
-use std::io::{BufReader, BufWriter, Read, Seek, SeekFrom, Write};
+use std::io::{BufReader, BufWriter, Write};
 use std::path::Path;
 use std::sync::Arc;
 
-use ignore::WalkBuilder;
 use rayon::prelude::*;
 
 use crate::archive::CreateOptions;
-use crate::chunk::chunk_data;
-use crate::compress;
+use crate::block::{self, CompressedChunk};
 use crate::dedup::DedupStore;
 use crate::error::{Error, Result};
 use crate::extract::{read_footer, read_index};
 use crate::format::*;
-use crate::hash::{hash_block, merkle_root};
+use crate::hash::merkle_root;
 use crate::index::serialize_index;
 use crate::metadata::{capture_metadata, restore_metadata, validate_extraction_path};
 use crate::progress::CreateProgress;
 
-/// Minimum chunk size — files smaller than this skip FastCDC
-const MIN_CHUNK_SIZE: usize = 64 * 1024;
-const MIN_COMPRESS_SIZE: usize = 64;
 const WRITE_BUFFER_SIZE: usize = 256 * 1024;
 
 /// Stats for incremental archive creation
@@ -47,63 +42,6 @@ pub struct IncrementalStats {
 struct ProcessedFile {
     entry: FileEntry,
     chunks: Vec<CompressedChunk>,
-}
-
-struct CompressedChunk {
-    hash: Hash,
-    uncompressed_size: u32,
-    compressed_data: Vec<u8>,
-    codec: u8,
-}
-
-fn process_file_data(data: &[u8], codec: u8, level: i32) -> Result<Vec<CompressedChunk>> {
-    if data.is_empty() {
-        return Ok(vec![]);
-    }
-
-    if data.len() < MIN_CHUNK_SIZE {
-        let hash = hash_block(data);
-        let compressed = if data.len() >= MIN_COMPRESS_SIZE {
-            let c = compress::compress(data, codec, level)?;
-            if c.len() < data.len() {
-                (c, codec)
-            } else {
-                (data.to_vec(), CODEC_NONE)
-            }
-        } else {
-            (data.to_vec(), CODEC_NONE)
-        };
-        return Ok(vec![CompressedChunk {
-            hash,
-            uncompressed_size: data.len() as u32,
-            compressed_data: compressed.0,
-            codec: compressed.1,
-        }]);
-    }
-
-    let raw_chunks = chunk_data(data);
-    raw_chunks
-        .into_iter()
-        .map(|chunk| {
-            let orig_size = chunk.data.len() as u32;
-            let (compressed_data, actual_codec) = if chunk.data.len() >= MIN_COMPRESS_SIZE {
-                let c = compress::compress(&chunk.data, codec, level)?;
-                if c.len() < chunk.data.len() {
-                    (c, codec)
-                } else {
-                    (chunk.data, CODEC_NONE)
-                }
-            } else {
-                (chunk.data, CODEC_NONE)
-            };
-            Ok(CompressedChunk {
-                hash: chunk.hash,
-                uncompressed_size: orig_size,
-                compressed_data,
-                codec: actual_codec,
-            })
-        })
-        .collect()
 }
 
 /// Create an incremental archive storing only blocks not in the base.
@@ -133,16 +71,7 @@ pub fn create_incremental(
     let mut total_bytes: u64 = 0;
 
     for source in sources {
-        let walker = WalkBuilder::new(source)
-            .git_ignore(opts.respect_gitignore)
-            .git_global(opts.respect_gitignore)
-            .git_exclude(opts.respect_gitignore)
-            .hidden(false)
-            .filter_entry(|e| {
-                !(e.file_type().is_some_and(|ft| ft.is_dir()) && e.file_name() == ".git")
-            })
-            .follow_links(false)
-            .build();
+        let walker = block::configure_walker(source, opts.respect_gitignore).build();
 
         for entry in walker {
             let entry = entry.map_err(|e| Error::IoPath {
@@ -175,7 +104,7 @@ pub fn create_incremental(
             let chunks = match &file_entry.file_type {
                 FileType::File => {
                     let data = fs::read(path).map_err(|e| Error::io_path(path, e))?;
-                    process_file_data(&data, codec, level)?
+                    block::process_file_data(&data, codec, level)?
                 }
                 _ => vec![],
             };
@@ -384,10 +313,10 @@ pub fn extract_incremental(
         for bref in &entry.block_refs {
             let block_data = if bref.flags & BLOCKREF_FLAG_EXTERNAL != 0 {
                 // Read from base archive
-                get_block(&mut base_reader, &mut base_block_cache, bref.offset)?
+                block::get_block(&mut base_reader, &mut base_block_cache, bref.offset)?
             } else {
                 // Read from incremental archive
-                get_block(&mut reader, &mut block_cache, bref.offset)?
+                block::get_block(&mut reader, &mut block_cache, bref.offset)?
             };
 
             let start = bref.slice_start as usize;
@@ -421,36 +350,6 @@ pub fn extract_incremental(
     }
 
     Ok(stats)
-}
-
-fn get_block(
-    reader: &mut (impl Read + Seek),
-    cache: &mut HashMap<u64, Arc<Vec<u8>>>,
-    offset: u64,
-) -> Result<Arc<Vec<u8>>> {
-    if let Some(cached) = cache.get(&offset) {
-        return Ok(Arc::clone(cached));
-    }
-
-    reader.seek(SeekFrom::Start(offset))?;
-    let header = BlockHeader::read_from(reader)?;
-    let mut raw = vec![0u8; header.compressed_size as usize];
-    reader.read_exact(&mut raw)?;
-
-    let data = compress::decompress(&raw, header.codec, header.uncompressed_size as usize)?;
-
-    let actual_hash: Hash = blake3::hash(&data).into();
-    if actual_hash != header.hash {
-        return Err(Error::ChecksumMismatch {
-            offset,
-            expected: hex::encode(header.hash),
-            actual: hex::encode(actual_hash),
-        });
-    }
-
-    let arc = Arc::new(data);
-    cache.insert(offset, Arc::clone(&arc));
-    Ok(arc)
 }
 
 #[cfg(test)]

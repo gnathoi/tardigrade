@@ -3,26 +3,18 @@ use std::io::{BufWriter, Write};
 use std::path::Path;
 use std::sync::atomic::Ordering;
 
-use ignore::WalkBuilder;
 use rayon::prelude::*;
 
-use crate::chunk::chunk_data;
-use crate::compress;
+use crate::block::{self, CompressedChunk};
 use crate::dedup::DedupStore;
 use crate::encrypt::{self, KeyEncapsulation};
 use crate::erasure::{self, EccGroup, EccLevel};
 use crate::error::{Error, Result};
 use crate::format::*;
-use crate::hash::{hash_block, merkle_root};
+use crate::hash::merkle_root;
 use crate::index::serialize_index;
 use crate::metadata::capture_metadata;
 use crate::progress::CreateProgress;
-
-/// Minimum chunk size — files smaller than this skip FastCDC entirely
-const MIN_CHUNK_SIZE: usize = 64 * 1024;
-
-/// Minimum size where compression is likely to help
-const MIN_COMPRESS_SIZE: usize = 64;
 
 /// BufWriter buffer size (256 KB for better sequential write performance)
 const WRITE_BUFFER_SIZE: usize = 256 * 1024;
@@ -67,71 +59,6 @@ pub struct CreateStats {
 struct ProcessedFile {
     entry: FileEntry,
     chunks: Vec<CompressedChunk>,
-}
-
-struct CompressedChunk {
-    hash: Hash,
-    uncompressed_size: u32,
-    compressed_data: Vec<u8>,
-    codec: u8,
-}
-
-/// Chunk and compress a file's data. Optimized for common cases:
-/// - Empty files: no chunks
-/// - Small files (< 64KB): single block, skip FastCDC gear hash
-/// - Tiny blocks (< 64B): store uncompressed (zstd overhead > savings)
-/// - Large files: FastCDC content-defined chunking
-fn process_file_data(data: &[u8], codec: u8, level: i32) -> Result<Vec<CompressedChunk>> {
-    if data.is_empty() {
-        return Ok(vec![]);
-    }
-
-    // Small files: skip FastCDC entirely — one block, just hash + compress
-    if data.len() < MIN_CHUNK_SIZE {
-        let hash = hash_block(data);
-        let compressed = if data.len() >= MIN_COMPRESS_SIZE {
-            let c = compress::compress(data, codec, level)?;
-            // Only use compressed if it's actually smaller
-            if c.len() < data.len() {
-                (c, codec)
-            } else {
-                (data.to_vec(), CODEC_NONE)
-            }
-        } else {
-            (data.to_vec(), CODEC_NONE) // too small to compress
-        };
-        return Ok(vec![CompressedChunk {
-            hash,
-            uncompressed_size: data.len() as u32,
-            compressed_data: compressed.0,
-            codec: compressed.1,
-        }]);
-    }
-
-    // Large files: FastCDC content-defined chunking
-    let raw_chunks = chunk_data(data);
-    raw_chunks
-        .into_iter()
-        .map(|chunk| {
-            let orig_size = chunk.data.len() as u32;
-            let (compressed_data, actual_codec) = if chunk.data.len() >= MIN_COMPRESS_SIZE {
-                let c = compress::compress(&chunk.data, codec, level)?;
-                if c.len() < chunk.data.len() {
-                    (c, codec)
-                } else {
-                    (chunk.data, CODEC_NONE)
-                }
-            } else {
-                (chunk.data, CODEC_NONE)
-            };
-            Ok(CompressedChunk {
-                hash: chunk.hash,
-                uncompressed_size: orig_size,
-                compressed_data,
-                codec: actual_codec,
-            })
-        })
-        .collect()
 }
 
 /// Write parity blocks for a completed ECC group.
@@ -200,16 +127,9 @@ pub fn create_archive(
 
         for source in sources {
             let source_path = source.to_path_buf();
-            let walker = WalkBuilder::new(source)
-                .git_ignore(opts.respect_gitignore)
-                .git_global(opts.respect_gitignore)
-                .git_exclude(opts.respect_gitignore)
-                .hidden(false)
+            let mut wb = block::configure_walker(source, opts.respect_gitignore);
+            let walker = wb
                 .threads(rayon::current_num_threads().max(4))
-                .filter_entry(|e| {
-                    !(e.file_type().is_some_and(|ft| ft.is_dir()) && e.file_name() == ".git")
-                })
-                .follow_links(false)
                 .build_parallel();
 
             walker.run(|| {
@@ -280,7 +200,7 @@ pub fn create_archive(
                 FileType::File => {
                     let data = fs::read(path).map_err(|e| Error::io_path(path, e))?;
                     let len = data.len() as u64;
-                    let chunks = process_file_data(&data, codec, level)?;
+                    let chunks = block::process_file_data(&data, codec, level)?;
                     if let Some(p) = progress_ref {
                         p.inc_processed(len);
                     }
