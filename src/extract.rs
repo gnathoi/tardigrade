@@ -3,6 +3,7 @@ use std::fs::{self, File};
 use std::io::{BufReader, Read, Seek, SeekFrom};
 use std::path::Path;
 
+use crate::block;
 use crate::compress;
 use crate::encrypt::{self, KeyEncapsulation, SymmetricKey};
 use crate::erasure;
@@ -26,7 +27,7 @@ fn get_block(
     if let Some(cached) = cache.get(&offset) {
         return Ok(Arc::clone(cached));
     }
-    let data = match read_block(reader, offset, key) {
+    let data = match block::read_block(reader, offset, key) {
         Ok((_, data)) => data,
         Err(Error::ChecksumMismatch { .. }) if ecc_archive_path.is_some() => {
             let (_, data) = reconstruct_block_via_ecc(reader, ecc_archive_path.unwrap(), offset)?;
@@ -62,41 +63,6 @@ pub fn read_index(reader: &mut (impl Read + Seek), footer: &Footer) -> Result<Ve
             deserialize_index(&redundant_data, footer.index_length as usize * 10)
         }
     }
-}
-
-/// Read and decompress a single block from the archive.
-/// If `key` is Some, decrypts before decompressing.
-fn read_block(
-    reader: &mut (impl Read + Seek),
-    offset: u64,
-    key: Option<&SymmetricKey>,
-) -> Result<(BlockHeader, Vec<u8>)> {
-    reader.seek(SeekFrom::Start(offset))?;
-    let header = BlockHeader::read_from(reader)?;
-
-    let mut raw = vec![0u8; header.compressed_size as usize];
-    reader.read_exact(&mut raw)?;
-
-    // Decrypt if encrypted
-    let compressed = if let Some(k) = key {
-        encrypt::decrypt_block(&raw, k, &header.hash)?
-    } else {
-        raw
-    };
-
-    let data = compress::decompress(&compressed, header.codec, header.uncompressed_size as usize)?;
-
-    // Verify hash
-    let actual_hash: Hash = blake3::hash(&data).into();
-    if actual_hash != header.hash {
-        return Err(Error::ChecksumMismatch {
-            offset,
-            expected: hex::encode(header.hash),
-            actual: hex::encode(actual_hash),
-        });
-    }
-
-    Ok((header, data))
 }
 
 /// Attempt to reconstruct a corrupted block using ECC parity data.
