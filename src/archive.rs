@@ -203,7 +203,12 @@ pub fn create_archive(
     }
 
     let progress = if opts.show_progress {
-        Some(CreateProgress::new(total_bytes))
+        let p = CreateProgress::new(total_bytes);
+        p.stats.bytes_scanned.store(total_bytes, Ordering::Relaxed);
+        p.stats
+            .files_scanned
+            .store(walk_entries.len() as u64, Ordering::Relaxed);
+        Some(p)
     } else {
         None
     };
@@ -217,6 +222,7 @@ pub fn create_archive(
     // before the next batch starts. Memory is bounded to O(batch_size × file_size).
     let batch_size = rayon::current_num_threads().max(4) * 4;
 
+    let progress_ref = &progress;
     let process_one =
         |(path, source, _size): &(std::path::PathBuf, std::path::PathBuf, u64)| -> Result<ProcessedFile> {
             let file_entry = capture_metadata(path, source)?;
@@ -224,7 +230,12 @@ pub fn create_archive(
             let chunks = match &file_entry.file_type {
                 FileType::File => {
                     let data = fs::read(path).map_err(|e| Error::io_path(path, e))?;
-                    process_file_data(&data, codec, level)?
+                    let len = data.len() as u64;
+                    let chunks = process_file_data(&data, codec, level)?;
+                    if let Some(p) = progress_ref {
+                        p.inc_processed(len);
+                    }
+                    chunks
                 }
                 _ => vec![],
             };
