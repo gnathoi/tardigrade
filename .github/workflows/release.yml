@@ -84,15 +84,6 @@ jobs:
       - uses: dtolnay/rust-toolchain@stable
       - uses: Swatinem/rust-cache@v2
 
-      - name: Install b3sum
-        run: cargo install b3sum
-
-      - name: Generate checksums
-        run: |
-          cd artifacts
-          sha256sum tdg-* > SHA256SUMS
-          b3sum tdg-* > B3SUMS
-
       - name: Dogfood — create .tg archives from each platform binary
         run: |
           tar xzf artifacts/tdg-x86_64-unknown-linux-gnu.tar.gz -C /tmp
@@ -118,6 +109,15 @@ jobs:
             /tmp/tdg verify "artifacts/${target}.tg"
             rm -rf "$tmpdir"
           done
+
+      - name: Install b3sum
+        run: cargo install b3sum
+
+      - name: Generate checksums
+        run: |
+          cd artifacts
+          sha256sum tdg-* > SHA256SUMS
+          b3sum tdg-* > B3SUMS
 
       - name: Create release
         uses: softprops/action-gh-release@v2
