@@ -77,7 +77,7 @@ tar and zip have zero protection against bit rot. One flipped bit and your data 
 - Three levels: `low` (default, ~20% overhead), `medium` (~40%), `high` (~60%). Disable with `--ecc none`
 
 **Encryption**
-- **ChaCha20-Poly1305 AEAD** with passphrase key wrapping
+- **ChaCha20-Poly1305 AEAD** with Argon2id key derivation (memory-hard, GPU-resistant)
 
 **Archive operations**
 - **Temporal archives** — `--append` for point-in-time snapshots, `tdg log` to browse
@@ -271,7 +271,7 @@ Files are split at content boundaries (FastCDC, 64KB-1MB, target 256KB). Blocks 
 
 - Archive key: random 256-bit symmetric key
 - Block encryption: ChaCha20-Poly1305 AEAD, nonce derived from content hash
-- Key wrapping: passphrase -> BLAKE3 KDF -> wrapping key -> encrypted archive key
+- Key wrapping: passphrase -> Argon2id (64 MB, 3 iterations) -> wrapping key -> encrypted archive key
 - Dedup disabled when encrypted (prevents hash-based content inference)
 
 ## Architecture
