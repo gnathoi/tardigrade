@@ -258,6 +258,16 @@ fn cmd_create(
                 .dim(),
             );
         }
+        if stats.dedup_overflow > 0 {
+            println!(
+                "  {}",
+                style(format!(
+                    "warning: dedup store full, {} blocks not tracked (some dedup opportunities missed)",
+                    stats.dedup_overflow
+                ))
+                .yellow(),
+            );
+        }
 
         if let Some(ref level) = ecc_level {
             println!(
