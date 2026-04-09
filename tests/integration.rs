@@ -126,6 +126,85 @@ fn cli_info() {
     assert!(stdout.contains("Files:"));
 }
 
+// ─── Cat ──────────────────────────────────────────────────────────────────
+
+#[test]
+fn cli_cat() {
+    let tmp = TempDir::new().unwrap();
+    let src = tmp.path().join("src");
+    create_test_dir(&src);
+
+    let archive = tmp.path().join("cat.tg");
+    tdg()
+        .args([
+            "create",
+            archive.to_str().unwrap(),
+            src.to_str().unwrap(),
+            "-q",
+        ])
+        .output()
+        .unwrap();
+
+    // Cat an existing file
+    let output = tdg()
+        .args(["cat", archive.to_str().unwrap(), "hello.txt"])
+        .output()
+        .unwrap();
+    assert!(output.status.success());
+    assert_eq!(
+        String::from_utf8_lossy(&output.stdout),
+        "Hello, tardigrade!"
+    );
+
+    // Cat a file in a subdirectory
+    let output = tdg()
+        .args(["cat", archive.to_str().unwrap(), "subdir/nested.txt"])
+        .output()
+        .unwrap();
+    assert!(output.status.success());
+    assert_eq!(
+        String::from_utf8_lossy(&output.stdout),
+        "Nested file content."
+    );
+
+    // Cat a nonexistent file should fail
+    let output = tdg()
+        .args(["cat", archive.to_str().unwrap(), "nonexistent.txt"])
+        .output()
+        .unwrap();
+    assert!(!output.status.success());
+}
+
+#[test]
+fn cli_cat_large_file() {
+    let tmp = TempDir::new().unwrap();
+    let src = tmp.path().join("src");
+    fs::create_dir_all(&src).unwrap();
+
+    // Create a file large enough to span multiple blocks (>256KB)
+    let large_content = "x".repeat(500_000);
+    fs::write(src.join("large.txt"), &large_content).unwrap();
+
+    let archive = tmp.path().join("cat_large.tg");
+    tdg()
+        .args([
+            "create",
+            archive.to_str().unwrap(),
+            src.to_str().unwrap(),
+            "-q",
+        ])
+        .output()
+        .unwrap();
+
+    let output = tdg()
+        .args(["cat", archive.to_str().unwrap(), "large.txt"])
+        .output()
+        .unwrap();
+    assert!(output.status.success());
+    assert_eq!(output.stdout.len(), 500_000);
+    assert_eq!(String::from_utf8_lossy(&output.stdout), large_content);
+}
+
 // ─── Verify ────────────────────────────────────────────────────────────────
 
 #[test]
