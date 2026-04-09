@@ -10,7 +10,6 @@ mod erasure;
 mod error;
 mod extract;
 mod format;
-mod fuse_mount;
 mod hash;
 mod incremental;
 mod index;

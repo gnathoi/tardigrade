@@ -7,7 +7,7 @@ use crate::hash::hash_block;
 /// Returns (compressed_bytes, hash_of_uncompressed_index).
 pub fn serialize_index(entries: &[FileEntry]) -> Result<(Vec<u8>, Hash)> {
     let raw = rmp_serde::to_vec(entries)
-        .map_err(|e| Error::IndexDeserialize(format!("serialize: {e}")))?;
+        .map_err(|e| Error::IndexDeserialize(format!("index serialize: {e}")))?;
 
     let index_hash = hash_block(&raw);
 
