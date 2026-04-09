@@ -14,6 +14,7 @@ DATASET_LABELS = {
     'source_project': 'Source Project\n270 files, 5 MB',
     'dedup_heavy': 'Heavy Dedup\nshared deps, 13 MB',
     'large_mixed': 'Large Mixed\nlogs+bins, 102 MB',
+    '10gb_mixed': '10 GB Mixed\n1000 files, 10 GB',
 }
 
 BG = '#0e1117'
@@ -34,6 +35,17 @@ plt.rcParams.update({
     'xtick.color': DIM,
     'ytick.color': DIM,
 })
+
+def load_meta(csv_dir):
+    meta_path = os.path.join(csv_dir, 'meta.txt')
+    meta = {}
+    if os.path.exists(meta_path):
+        with open(meta_path) as f:
+            for line in f:
+                if '=' in line:
+                    k, v = line.strip().split('=', 1)
+                    meta[k] = v
+    return meta
 
 def load_csv(path):
     rows = []
@@ -86,8 +98,11 @@ def plot_speed(rows, output_dir):
         ax.legend(fontsize=8, facecolor=PANEL, edgecolor=BORDER, labelcolor=DIM)
         ax.set_ylim(0, ymax * 1.3)
 
-    fig.suptitle('tdg vs tar+zstd  /  speed  /  lower is better',
-                 fontsize=10, color=DIM, fontfamily='monospace', y=0.98)
+    meta = load_meta(output_dir)
+    subtitle = 'tdg vs tar+zstd  /  speed  /  lower is better'
+    if meta.get('version'):
+        subtitle += f'  [{meta["version"]}]'
+    fig.suptitle(subtitle, fontsize=10, color=DIM, fontfamily='monospace', y=0.98)
     fig.tight_layout(rect=[0, 0, 1, 0.95])
     fig.savefig(os.path.join(output_dir, 'bench-speed.svg'), format='svg',
                 bbox_inches='tight', facecolor=BG)

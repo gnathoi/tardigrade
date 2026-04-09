@@ -29,6 +29,17 @@ plt.rcParams.update({
     'ytick.color': DIM,
 })
 
+def load_meta(csv_dir):
+    meta_path = os.path.join(csv_dir, 'meta.txt')
+    meta = {}
+    if os.path.exists(meta_path):
+        with open(meta_path) as f:
+            for line in f:
+                if '=' in line:
+                    k, v = line.strip().split('=', 1)
+                    meta[k] = v
+    return meta
+
 def load_csv(path):
     threads, times, throughputs = [], [], []
     with open(path) as f:
@@ -58,7 +69,9 @@ def plot(csv_path, output_dir):
     s, t1 = amdahl_fit(threads, throughputs)
     max_measured = max(threads)
 
-    extrap_threads = list(range(1, 65))
+    # Extrapolate beyond measured data — extend to 128 if measured past 32
+    extrap_max = max(128, max_measured * 2)
+    extrap_threads = list(range(1, extrap_max + 1))
     extrap_tp = [t1 / (s + (1-s)/n) for n in extrap_threads]
 
     fig, (ax1, ax2) = plt.subplots(1, 2, figsize=(12, 4.2))
@@ -69,7 +82,7 @@ def plot(csv_path, output_dir):
     ax1.fill_between(extrap_threads, 0, extrap_tp, color=EXTRAP, alpha=0.08, zorder=1)
     ax1.plot(extrap_threads, extrap_tp, '-', color=EXTRAP, linewidth=1.5, alpha=0.6,
              label=f"amdahl (serial={s:.0%})")
-    ax1.plot(extrap_threads[:32], [t1*n for n in extrap_threads[:32]], '--',
+    ax1.plot(extrap_threads[:max_measured+1], [t1*n for n in extrap_threads[:max_measured+1]], '--',
              color=LINEAR, linewidth=1, label='linear')
     ax1.plot(threads, throughputs, 'o-', color=TDG, linewidth=2,
              markersize=6, markeredgecolor=PANEL, markeredgewidth=1.5,
@@ -84,19 +97,21 @@ def plot(csv_path, output_dir):
                  textcoords="offset points", xytext=(8, 6), fontsize=9,
                  color=TDG, fontweight='bold')
 
-    for cores in [32, 64]:
-        tp = t1 / (s + (1-s)/cores)
-        ax1.plot(cores, tp, 's', color=CALLOUT, markersize=4, zorder=4)
-        ax1.annotate(f'{tp:.0f} MB/s @ {cores}c', (cores, tp),
-                     textcoords="offset points", xytext=(6, -12),
-                     fontsize=8, color=CALLOUT)
+    # Annotate projection points beyond measured range
+    for cores in [32, 64, 128]:
+        if cores > max_measured:
+            tp = t1 / (s + (1-s)/cores)
+            ax1.plot(cores, tp, 's', color=CALLOUT, markersize=4, zorder=4)
+            ax1.annotate(f'{tp:.0f} MB/s @ {cores}c', (cores, tp),
+                         textcoords="offset points", xytext=(6, -12),
+                         fontsize=8, color=CALLOUT)
 
     ax1.set_xlabel('threads', fontsize=9)
     ax1.set_ylabel('MB/s', fontsize=9)
     ax1.set_title('THROUGHPUT', fontsize=11, fontweight='bold', color=TEXT, loc='left', pad=8)
     ax1.legend(fontsize=8, facecolor=PANEL, edgecolor=BORDER, labelcolor=DIM)
-    ax1.set_xlim(0, 66)
-    ax1.set_ylim(0, max(extrap_tp[:64]) * 1.15)
+    ax1.set_xlim(0, min(extrap_max, 128) + 2)
+    ax1.set_ylim(0, max(extrap_tp[:min(extrap_max, 128)]) * 1.15)
 
     # --- Speedup ---
     setup_ax(ax2)
@@ -115,11 +130,14 @@ def plot(csv_path, output_dir):
     ax2.set_ylabel('speedup', fontsize=9)
     ax2.set_title('SPEEDUP', fontsize=11, fontweight='bold', color=TEXT, loc='left', pad=8)
     ax2.legend(fontsize=8, facecolor=PANEL, edgecolor=BORDER, labelcolor=DIM)
-    ax2.set_xlim(0, 66)
-    ax2.set_ylim(0, max(extrap_speedup[:64]) * 1.15)
+    ax2.set_xlim(0, min(extrap_max, 128) + 2)
+    ax2.set_ylim(0, max(extrap_speedup[:min(extrap_max, 128)]) * 1.15)
 
-    fig.suptitle(f'tdg  /  core scaling  /  measured + extrapolated',
-                 fontsize=10, color=DIM, fontfamily='monospace', y=0.98)
+    meta = load_meta(output_dir)
+    subtitle = 'tdg  /  core scaling  /  measured + extrapolated'
+    if meta.get('version'):
+        subtitle += f'  [{meta["version"]}]'
+    fig.suptitle(subtitle, fontsize=10, color=DIM, fontfamily='monospace', y=0.98)
     fig.tight_layout(rect=[0, 0, 1, 0.95])
     fig.savefig(os.path.join(output_dir, 'bench-scaling.svg'), format='svg',
                 bbox_inches='tight', facecolor=BG)
