@@ -79,18 +79,21 @@ def plot_speed(rows, output_dir):
         ax.bar(x - w/2, tdg_t, w, color=TDG, edgecolor='none', zorder=3, label='tdg')
         ax.bar(x + w/2, tar_t, w, color=TAR, edgecolor='none', zorder=3, alpha=0.6, label='tar+zstd')
 
-        ymax = max(max(tdg_t), max(tar_t))
         for i in range(len(datasets)):
-            ax.text(x[i] - w/2, tdg_t[i] + ymax*0.02, f'{tdg_t[i]}',
-                    ha='center', va='bottom', fontsize=9, color=TDG, fontweight='bold', fontfamily='monospace')
-            ax.text(x[i] + w/2, tar_t[i] + ymax*0.02, f'{tar_t[i]}',
-                    ha='center', va='bottom', fontsize=9, color=DIM, fontfamily='monospace')
+            def fmt_ms(v):
+                return f'{v/1000:.1f}s' if v >= 1000 else f'{v}ms'
+            ax.text(x[i] - w/2, tdg_t[i] * 1.08, fmt_ms(tdg_t[i]),
+                    ha='center', va='bottom', fontsize=8, color=TDG, fontweight='bold', fontfamily='monospace')
+            ax.text(x[i] + w/2, tar_t[i] * 1.08, fmt_ms(tar_t[i]),
+                    ha='center', va='bottom', fontsize=8, color=DIM, fontfamily='monospace')
 
+        ax.set_yscale('log')
         ax.set_xticks(x)
         ax.set_xticklabels([DATASET_LABELS[d] for d in datasets], fontsize=8)
-        ax.set_ylabel('ms', fontsize=9)
+        ax.set_ylabel('ms (log)', fontsize=9)
         ax.set_title(title, fontsize=11, fontweight='bold', color=TEXT, loc='left', pad=8)
-        ax.set_ylim(0, ymax * 1.3)
+        ymax = max(max(tdg_t), max(tar_t))
+        ax.set_ylim(min(min(tdg_t), min(tar_t)) * 0.5, ymax * 3)
 
     # Single shared legend below the figure
     handles, labels = axes[0].get_legend_handles_labels()
@@ -98,7 +101,7 @@ def plot_speed(rows, output_dir):
                facecolor=PANEL, edgecolor=BORDER, labelcolor=DIM)
 
     meta = load_meta(output_dir)
-    subtitle = 'tdg vs tar+zstd  /  speed  /  lower is better'
+    subtitle = 'tdg vs tar+zstd  /  speed (log scale)  /  lower is better'
     if meta.get('version'):
         subtitle += f'  [{meta["version"]}]'
     fig.suptitle(subtitle, fontsize=10, color=DIM, fontfamily='monospace', y=0.98)
@@ -130,19 +133,23 @@ def plot_size(rows, output_dir):
     ax.barh(y + h/2, tar_sizes, h, color=TAR, edgecolor='none', zorder=2, alpha=0.6, label='tar+zstd')
     ax.barh(y - h/2, tdg_sizes, h, color=TDG, edgecolor='none', zorder=2, label='tdg')
 
-    xmax = max(input_sizes) * 1.15
+    ax.set_xscale('log')
     for i in range(len(datasets)):
-        ax.text(tdg_sizes[i] + xmax*0.01, y[i] - h/2,
-                f'{tdg_sizes[i]:.1f} MB', va='center', fontsize=9,
+        def fmt_mb(v):
+            return f'{v/1024:.1f} GB' if v >= 1024 else f'{v:.1f} MB'
+        ax.text(tdg_sizes[i] * 1.05, y[i] - h/2,
+                fmt_mb(tdg_sizes[i]), va='center', fontsize=8,
                 color=TDG, fontweight='bold', fontfamily='monospace')
-        ax.text(tar_sizes[i] + xmax*0.01, y[i] + h/2,
-                f'{tar_sizes[i]:.1f} MB', va='center', fontsize=9,
+        ax.text(tar_sizes[i] * 1.05, y[i] + h/2,
+                fmt_mb(tar_sizes[i]), va='center', fontsize=8,
                 color=DIM, fontfamily='monospace')
 
     ax.set_yticks(y)
     ax.set_yticklabels([DATASET_LABELS[d] for d in datasets], fontsize=9)
-    ax.set_xlabel('MB', fontsize=9)
-    ax.set_title('SIZE  /  smaller is better', fontsize=11, fontweight='bold', color=TEXT, loc='left', pad=8)
+    ax.set_xlabel('MB (log)', fontsize=9)
+    ax.set_title('SIZE (log scale)  /  smaller is better', fontsize=11, fontweight='bold', color=TEXT, loc='left', pad=8)
+    xmax = max(input_sizes)
+    ax.set_xlim(min(min(tdg_sizes), min(tar_sizes)) * 0.5, xmax * 5)
     ax.legend(fontsize=8, loc='lower right', facecolor=PANEL, edgecolor=BORDER, labelcolor=DIM)
 
     fig.tight_layout()

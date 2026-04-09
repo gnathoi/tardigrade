@@ -54,7 +54,7 @@ echo "── Generating plots ──"
 # Create temporary venv, install matplotlib, generate plots, clean up
 VENV_DIR=$(mktemp -d)
 python3 -m venv "$VENV_DIR"
-"$VENV_DIR/bin/pip" install -q matplotlib numpy
+"$VENV_DIR/bin/pip" install -q -r "$SCRIPT_DIR/requirements.txt"
 PYTHON="$VENV_DIR/bin/python3"
 
 $PYTHON "$SCRIPT_DIR/plot.py" "$SCRIPT_DIR/results.csv" "$SCRIPT_DIR/"

@@ -8,6 +8,7 @@ import matplotlib
 matplotlib.use('Agg')
 import matplotlib.pyplot as plt
 import numpy as np
+from scipy.optimize import curve_fit
 
 BG = '#0e1117'
 PANEL = '#161b22'
@@ -50,12 +51,21 @@ def load_csv(path):
     return threads, times, throughputs
 
 def amdahl_fit(threads, throughputs):
-    t1 = throughputs[0]
-    n_max = threads[-1]
-    tp_max = throughputs[-1]
-    ratio = t1 / tp_max
-    s = (ratio - 1.0/n_max) / (1.0 - 1.0/n_max)
-    return max(0.01, min(0.99, s)), t1
+    """Least-squares fit of Amdahl's law: tp(n) = t1 / (s + (1-s)/n)."""
+    threads_a = np.array(threads, dtype=float)
+    tp_a = np.array(throughputs, dtype=float)
+
+    def model(n, t1, s):
+        return t1 / (s + (1 - s) / n)
+
+    # Initial guess: t1 from single-thread, s from first/last ratio
+    t1_init = tp_a[0]
+    ratio = t1_init / tp_a[-1]
+    s_init = max(0.05, (ratio - 1.0/threads_a[-1]) / (1.0 - 1.0/threads_a[-1]))
+
+    popt, _ = curve_fit(model, threads_a, tp_a, p0=[t1_init, s_init],
+                        bounds=([0, 0.001], [np.inf, 0.999]))
+    return popt[1], popt[0]  # s, t1
 
 def setup_ax(ax):
     ax.set_facecolor(PANEL)
