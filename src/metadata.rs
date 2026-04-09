@@ -12,6 +12,13 @@ pub fn capture_metadata(path: &Path, base: &Path) -> Result<FileEntry> {
     let meta = fs::symlink_metadata(path).map_err(|e| Error::io_path(path, e))?;
 
     let relative = path.strip_prefix(base).unwrap_or(path);
+    // When archiving a single file (source == file path), strip_prefix yields ""
+    // Use the filename so extraction doesn't try to write to the dest directory itself
+    let relative = if relative.as_os_str().is_empty() {
+        Path::new(path.file_name().unwrap_or(path.as_os_str()))
+    } else {
+        relative
+    };
 
     // Convert path to raw bytes
     #[cfg(unix)]

@@ -1322,7 +1322,7 @@ dependencies = [
 
 [[package]]
 name = "tardigrade"
-version = "0.5.3"
+version = "0.5.4"
 dependencies = [
  "anyhow",
  "blake3",
