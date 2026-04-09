@@ -350,6 +350,7 @@ fn cmd_append(
     Ok(())
 }
 
+#[allow(clippy::too_many_arguments)]
 fn cmd_create_incremental(
     base: &Path,
     archive: &Path,
