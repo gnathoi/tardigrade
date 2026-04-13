@@ -207,9 +207,7 @@ impl BatchController {
                 return;
             }
 
-            if pressure < PRESSURE_LOW
-                && self.current_batch < self.max_batch
-                && !self.growth_frozen
+            if pressure < PRESSURE_LOW && self.current_batch < self.max_batch && !self.growth_frozen
             {
                 let new_size = (self.current_batch * 2).min(self.max_batch);
                 self.diagnostics.push(format!(
