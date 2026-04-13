@@ -2,6 +2,11 @@
 
 All notable changes to tardigrade will be documented in this file.
 
+## [0.7.1] - 2026-04-13
+
+### Added
+- `extract` now shows a live progress bar, spinner, elapsed time, and ETA — same style as `create`. Covers plain, encrypted, incremental, temporal, and tar/tar.gz/tar.zst extraction. For streaming tar formats, progress is measured against on-disk file size. Suppressed with `--quiet`.
+
 ## [0.7.0] - 2026-04-09
 
 ### Added
