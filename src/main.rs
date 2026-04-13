@@ -26,7 +26,8 @@ mod verify;
 use std::path::{Path, PathBuf};
 use std::time::Instant;
 
-use clap::Parser;
+use clap::{CommandFactory, Parser};
+use clap_complete::{Shell, generate};
 use console::style;
 use humansize::{BINARY, format_size};
 
@@ -132,6 +133,7 @@ fn main() {
             compress: codec_name,
             level,
         } => cmd_convert(&input, &output, &codec_name, level, cli.quiet),
+        Command::Completions { shell } => cmd_completions(shell),
     };
 
     if let Err(e) = result {
@@ -1153,6 +1155,13 @@ fn cmd_update(check: bool, quiet: bool) -> error::Result<()> {
     } else {
         update::do_update(quiet)
     }
+}
+
+fn cmd_completions(shell: Shell) -> error::Result<()> {
+    let mut cmd = Cli::command();
+    let bin_name = cmd.get_name().to_string();
+    generate(shell, &mut cmd, bin_name, &mut std::io::stdout());
+    Ok(())
 }
 
 fn cmd_convert(
