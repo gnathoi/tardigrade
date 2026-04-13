@@ -2,6 +2,18 @@
 
 All notable changes to tardigrade will be documented in this file.
 
+## [0.8.0] - 2026-04-13
+
+### Added
+- Adaptive thread scaling during `tdg create`. Default `-j auto` is now smart about memory, not just core count. Three layers:
+  1. **Startup memory cap** — on systems where `cores * 32 MiB` would exceed half of available memory, thread count is clamped to fit. Prevents OOM on CI runners, containers, and small VPS. An explicit `-j N` bypasses the cap.
+  2. **Runtime backpressure** — during the archive pipeline, process RSS is sampled at each batch boundary. If it exceeds 75% of the memory budget, batch size is halved (less in-flight work, less peak memory). When pressure drops below 40%, batch size grows back up.
+  3. **Throughput-based scaling** — per-batch throughput is tracked across the first several batches. If adding more work per batch stops improving bytes/sec (because the serial fraction — dedup lookup, sequential writes — dominates), growth is frozen at the current size.
+- `--verbose` mode prints the startup thread decision and every runtime batch adjustment. When the memory cap triggers, a one-line `note:` is shown even without `--verbose` so silent OOM prevention is still observable.
+
+### Changed
+- `CreateOptions` gained a `verbose: bool` field (defaults to `false`).
+
 ## [0.7.2] - 2026-04-13
 
 ### Added
