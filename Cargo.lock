@@ -317,6 +317,15 @@ dependencies = [
 ]
 
 [[package]]
+name = "clap_complete"
+version = "4.6.2"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "3ff7a1dccbdd8b078c2bdebff47e404615151534d5043da397ec50286816f9cb"
+dependencies = [
+ "clap",
+]
+
+[[package]]
 name = "clap_derive"
 version = "4.6.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -1380,7 +1389,7 @@ dependencies = [
 
 [[package]]
 name = "tardigrade"
-version = "0.7.1"
+version = "0.7.2"
 dependencies = [
  "anyhow",
  "argon2",
@@ -1389,6 +1398,7 @@ dependencies = [
  "chacha20poly1305",
  "chrono",
  "clap",
+ "clap_complete",
  "console",
  "crc32fast",
  "crossbeam-channel",

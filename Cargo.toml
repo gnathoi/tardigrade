@@ -1,6 +1,6 @@
 [package]
 name = "tardigrade"
-version = "0.7.1"
+version = "0.7.2"
 edition = "2024"
 description = "Modern archive tool — tar for 2026"
 license = "Apache-2.0"
@@ -13,6 +13,7 @@ path = "src/main.rs"
 [dependencies]
 # CLI
 clap = { version = "4", features = ["derive"] }
+clap_complete = "4"
 
 # Compression
 zstd = "0.13"

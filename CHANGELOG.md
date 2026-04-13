@@ -2,6 +2,12 @@
 
 All notable changes to tardigrade will be documented in this file.
 
+## [0.7.2] - 2026-04-13
+
+### Added
+- `tdg completions <shell>` prints a tab-completion script for `bash`, `zsh`, `fish`, `powershell`, or `elvish`. After install, the shell completes subcommands, flags, and paths.
+- README now has a full per-command reference covering every subcommand, every flag, arguments, defaults, and examples. Run `tdg <command> --help` for the same information from the CLI.
+
 ## [0.7.1] - 2026-04-13
 
 ### Added
