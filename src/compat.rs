@@ -8,8 +8,27 @@
 use std::fs::File;
 use std::io::{BufReader, Read, Seek, SeekFrom};
 use std::path::Path;
+use std::sync::Arc;
+use std::sync::atomic::{AtomicU64, Ordering};
 
 use crate::error::{Error, Result};
+use crate::progress::ExtractProgress;
+
+/// Counts bytes pulled from the wrapped reader. Used to drive the extract
+/// progress bar against the on-disk file size for streaming tar formats,
+/// where the uncompressed total is unknown without a pre-scan.
+struct CountingReader<R> {
+    inner: R,
+    counter: Arc<AtomicU64>,
+}
+
+impl<R: Read> Read for CountingReader<R> {
+    fn read(&mut self, buf: &mut [u8]) -> std::io::Result<usize> {
+        let n = self.inner.read(buf)?;
+        self.counter.fetch_add(n as u64, Ordering::Relaxed);
+        Ok(n)
+    }
+}
 
 /// Supported legacy formats
 #[derive(Debug, Clone, Copy)]
@@ -61,29 +80,82 @@ pub fn detect_legacy_format(path: &Path) -> Result<Option<LegacyFormat>> {
 
 /// Extract a legacy tar-based archive to a destination directory.
 pub fn extract_legacy(path: &Path, dest: &Path) -> Result<LegacyExtractStats> {
+    extract_legacy_inner(path, dest, false)
+}
+
+/// Same as `extract_legacy`, but renders a live progress bar + spinner.
+/// Progress is measured against the on-disk (possibly compressed) file size,
+/// since tar streams don't announce an uncompressed total up front.
+pub fn extract_legacy_with_progress(path: &Path, dest: &Path) -> Result<LegacyExtractStats> {
+    extract_legacy_inner(path, dest, true)
+}
+
+fn extract_legacy_inner(
+    path: &Path,
+    dest: &Path,
+    show_progress: bool,
+) -> Result<LegacyExtractStats> {
     let format = detect_legacy_format(path)?
         .ok_or_else(|| Error::InvalidArchive("not a recognized tar format".into()))?;
 
     std::fs::create_dir_all(dest).map_err(|e| Error::io_path(dest, e))?;
 
     let file = File::open(path).map_err(|e| Error::io_path(path, e))?;
-    let reader = BufReader::new(file);
+    let file_size = file.metadata().map(|m| m.len()).unwrap_or(0);
 
-    match format {
+    let progress = if show_progress {
+        Some(ExtractProgress::new(file_size))
+    } else {
+        None
+    };
+    let counter = Arc::new(AtomicU64::new(0));
+    let reader = BufReader::new(CountingReader {
+        inner: file,
+        counter: Arc::clone(&counter),
+    });
+
+    let stats = match format {
         LegacyFormat::TarZst => {
             let decoder = zstd::Decoder::new(reader)
                 .map_err(|e| Error::Decompression(format!("zstd: {e}")))?;
-            extract_tar(decoder, dest)
+            extract_tar(decoder, dest, progress.as_ref(), &counter)
         }
         LegacyFormat::TarGz => {
             let decoder = flate2::read::GzDecoder::new(reader);
-            extract_tar(decoder, dest)
+            extract_tar(decoder, dest, progress.as_ref(), &counter)
         }
-        LegacyFormat::Tar => extract_tar(reader, dest),
+        LegacyFormat::Tar => extract_tar(reader, dest, progress.as_ref(), &counter),
+    }?;
+
+    if let Some(p) = &progress {
+        // Snap the bar to 100% for a clean finish even if the final reads
+        // undershot due to buffering.
+        let remaining = file_size.saturating_sub(counter.load(Ordering::Relaxed));
+        if remaining > 0 {
+            p.inc_extracted(remaining);
+        }
+        p.finish();
     }
+
+    Ok(stats)
 }
 
-fn extract_tar<R: Read>(reader: R, dest: &Path) -> Result<LegacyExtractStats> {
+fn extract_tar<R: Read>(
+    reader: R,
+    dest: &Path,
+    progress: Option<&ExtractProgress>,
+    counter: &Arc<AtomicU64>,
+) -> Result<LegacyExtractStats> {
+    let mut last_pos: u64 = 0;
+    let mut tick = |progress: Option<&ExtractProgress>| {
+        if let Some(p) = progress {
+            let now = counter.load(Ordering::Relaxed);
+            if now > last_pos {
+                p.inc_extracted(now - last_pos);
+                last_pos = now;
+            }
+        }
+    };
     let mut archive = tar::Archive::new(reader);
     let mut stats = LegacyExtractStats {
         file_count: 0,
@@ -148,6 +220,8 @@ fn extract_tar<R: Read>(reader: R, dest: &Path) -> Result<LegacyExtractStats> {
             }
             _ => {} // Skip other entry types
         }
+
+        tick(progress);
     }
 
     Ok(stats)
