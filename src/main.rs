@@ -456,9 +456,15 @@ fn cmd_extract(archive: &Path, dest: &Path, encrypt: bool, quiet: bool) -> error
     let stats = if encrypt {
         let pass = rpassword::prompt_password("Passphrase: ")
             .map_err(|e| error::Error::Io { source: e })?;
-        extract::extract_archive_encrypted(archive, dest, pass.as_bytes())?
-    } else {
+        if quiet {
+            extract::extract_archive_encrypted(archive, dest, pass.as_bytes())?
+        } else {
+            extract::extract_archive_with_progress(archive, dest, Some(pass.as_bytes()))?
+        }
+    } else if quiet {
         extract::extract_archive(archive, dest)?
+    } else {
+        extract::extract_archive_with_progress(archive, dest, None)?
     };
     let elapsed = start.elapsed();
 
@@ -497,7 +503,11 @@ fn cmd_extract_legacy(
     quiet: bool,
 ) -> error::Result<()> {
     let start = Instant::now();
-    let stats = compat::extract_legacy(archive, dest)?;
+    let stats = if quiet {
+        compat::extract_legacy(archive, dest)?
+    } else {
+        compat::extract_legacy_with_progress(archive, dest)?
+    };
     let elapsed = start.elapsed();
 
     if !quiet {
@@ -535,7 +545,11 @@ fn cmd_extract_incremental(
     quiet: bool,
 ) -> error::Result<()> {
     let start = Instant::now();
-    let stats = incremental::extract_incremental(archive, base, dest)?;
+    let stats = if quiet {
+        incremental::extract_incremental(archive, base, dest)?
+    } else {
+        incremental::extract_incremental_with_progress(archive, base, dest)?
+    };
     let elapsed = start.elapsed();
 
     if !quiet {
@@ -573,7 +587,11 @@ fn cmd_extract_generation(
     quiet: bool,
 ) -> error::Result<()> {
     let start = Instant::now();
-    let stats = temporal::extract_generation(archive, generation, dest)?;
+    let stats = if quiet {
+        temporal::extract_generation(archive, generation, dest)?
+    } else {
+        temporal::extract_generation_with_progress(archive, generation, dest)?
+    };
     let elapsed = start.elapsed();
 
     if !quiet {

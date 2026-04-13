@@ -330,6 +330,24 @@ pub fn extract_generation(
     generation: u64,
     dest: &Path,
 ) -> Result<crate::extract::ExtractStats> {
+    extract_generation_inner(archive_path, generation, dest, false)
+}
+
+/// Same as `extract_generation`, but renders a live progress bar + spinner.
+pub fn extract_generation_with_progress(
+    archive_path: &Path,
+    generation: u64,
+    dest: &Path,
+) -> Result<crate::extract::ExtractStats> {
+    extract_generation_inner(archive_path, generation, dest, true)
+}
+
+fn extract_generation_inner(
+    archive_path: &Path,
+    generation: u64,
+    dest: &Path,
+    show_progress: bool,
+) -> Result<crate::extract::ExtractStats> {
     let snapshots = list_snapshots(archive_path)?;
 
     if snapshots.is_empty() {
@@ -367,6 +385,17 @@ pub fn extract_generation(
     };
 
     let mut block_cache: HashMap<u64, Arc<Vec<u8>>> = HashMap::new();
+
+    let total_bytes: u64 = entries
+        .iter()
+        .filter(|e| matches!(e.file_type, FileType::File))
+        .map(|e| e.size)
+        .sum();
+    let progress = if show_progress {
+        Some(crate::progress::ExtractProgress::new(total_bytes))
+    } else {
+        None
+    };
 
     // Directories first
     for entry in &entries {
@@ -410,9 +439,15 @@ pub fn extract_generation(
 
         stats.file_count += 1;
         stats.total_size += entry.size;
+        if let Some(p) = &progress {
+            p.inc_extracted(entry.size);
+        }
     }
 
     // Directory metadata
+    if let Some(p) = &progress {
+        p.start_finishing();
+    }
     for entry in &entries {
         if entry.file_type == FileType::Directory {
             let target = validate_extraction_path(&entry.path, dest)?;
@@ -420,6 +455,10 @@ pub fn extract_generation(
                 restore_metadata(&target, entry).ok();
             }
         }
+    }
+
+    if let Some(p) = &progress {
+        p.finish();
     }
 
     Ok(stats)

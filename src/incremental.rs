@@ -262,6 +262,24 @@ pub fn extract_incremental(
     base_path: &Path,
     dest: &Path,
 ) -> Result<crate::extract::ExtractStats> {
+    extract_incremental_inner(archive_path, base_path, dest, false)
+}
+
+/// Same as `extract_incremental`, but renders a live progress bar + spinner.
+pub fn extract_incremental_with_progress(
+    archive_path: &Path,
+    base_path: &Path,
+    dest: &Path,
+) -> Result<crate::extract::ExtractStats> {
+    extract_incremental_inner(archive_path, base_path, dest, true)
+}
+
+fn extract_incremental_inner(
+    archive_path: &Path,
+    base_path: &Path,
+    dest: &Path,
+    show_progress: bool,
+) -> Result<crate::extract::ExtractStats> {
     let file = File::open(archive_path).map_err(|e| Error::io_path(archive_path, e))?;
     let mut reader = BufReader::new(file);
     let header = ArchiveHeader::read_from(&mut reader)?;
@@ -287,6 +305,17 @@ pub fn extract_incremental(
 
     let mut block_cache: HashMap<u64, Arc<Vec<u8>>> = HashMap::new();
     let mut base_block_cache: HashMap<u64, Arc<Vec<u8>>> = HashMap::new();
+
+    let total_bytes: u64 = entries
+        .iter()
+        .filter(|e| matches!(e.file_type, FileType::File))
+        .map(|e| e.size)
+        .sum();
+    let progress = if show_progress {
+        Some(crate::progress::ExtractProgress::new(total_bytes))
+    } else {
+        None
+    };
 
     // First pass: directories
     for entry in &entries {
@@ -337,9 +366,15 @@ pub fn extract_incremental(
 
         stats.file_count += 1;
         stats.total_size += entry.size;
+        if let Some(p) = &progress {
+            p.inc_extracted(entry.size);
+        }
     }
 
     // Third pass: directory metadata
+    if let Some(p) = &progress {
+        p.start_finishing();
+    }
     for entry in &entries {
         if entry.file_type == FileType::Directory {
             let target = validate_extraction_path(&entry.path, dest)?;
@@ -347,6 +382,10 @@ pub fn extract_incremental(
                 restore_metadata(&target, entry).ok();
             }
         }
+    }
+
+    if let Some(p) = &progress {
+        p.finish();
     }
 
     Ok(stats)

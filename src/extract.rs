@@ -11,6 +11,7 @@ use crate::error::{Error, Result};
 use crate::format::*;
 use crate::index::deserialize_index;
 use crate::metadata::{restore_metadata, validate_extraction_path};
+use crate::progress::ExtractProgress;
 
 use std::path::PathBuf;
 use std::sync::Arc;
@@ -234,7 +235,7 @@ pub fn cat_file(
 
 /// Extract an archive to a destination directory.
 pub fn extract_archive(archive_path: &Path, dest: &Path) -> Result<ExtractStats> {
-    extract_archive_inner(archive_path, dest, None)
+    extract_archive_inner(archive_path, dest, None, false)
 }
 
 /// Extract an encrypted archive with a passphrase.
@@ -243,13 +244,24 @@ pub fn extract_archive_encrypted(
     dest: &Path,
     passphrase: &[u8],
 ) -> Result<ExtractStats> {
-    extract_archive_inner(archive_path, dest, Some(passphrase))
+    extract_archive_inner(archive_path, dest, Some(passphrase), false)
+}
+
+/// Extract an archive with a live progress bar, spinner, and ETA.
+/// Pass `passphrase = Some(&bytes)` for encrypted archives.
+pub fn extract_archive_with_progress(
+    archive_path: &Path,
+    dest: &Path,
+    passphrase: Option<&[u8]>,
+) -> Result<ExtractStats> {
+    extract_archive_inner(archive_path, dest, passphrase, true)
 }
 
 fn extract_archive_inner(
     archive_path: &Path,
     dest: &Path,
     passphrase: Option<&[u8]>,
+    show_progress: bool,
 ) -> Result<ExtractStats> {
     let file = File::open(archive_path).map_err(|e| Error::io_path(archive_path, e))?;
     let mut reader = BufReader::new(file);
@@ -289,6 +301,19 @@ fn extract_archive_inner(
         None
     };
     let ecc_ref = ecc_path.as_deref();
+
+    // Compute total bytes up front so the progress bar knows the denominator.
+    let total_bytes: u64 = entries
+        .iter()
+        .filter(|e| matches!(e.file_type, FileType::File))
+        .map(|e| e.size)
+        .sum();
+
+    let progress = if show_progress {
+        Some(ExtractProgress::new(total_bytes))
+    } else {
+        None
+    };
 
     // First pass: create all directories
     for entry in &entries {
@@ -364,6 +389,9 @@ fn extract_archive_inner(
 
                 stats.file_count += 1;
                 stats.total_size += entry.size;
+                if let Some(p) = &progress {
+                    p.inc_extracted(entry.size);
+                }
             }
             FileType::Symlink(target_bytes) => {
                 let target = validate_extraction_path(&entry.path, dest)?;
@@ -410,6 +438,9 @@ fn extract_archive_inner(
     }
 
     // Third pass: restore directory metadata (after all files are written)
+    if let Some(p) = &progress {
+        p.start_finishing();
+    }
     for entry in &entries {
         if entry.file_type == FileType::Directory {
             let target = validate_extraction_path(&entry.path, dest)?;
@@ -417,6 +448,10 @@ fn extract_archive_inner(
                 restore_metadata(&target, entry).ok(); // best effort for dirs
             }
         }
+    }
+
+    if let Some(p) = &progress {
+        p.finish();
     }
 
     Ok(stats)
