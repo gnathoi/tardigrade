@@ -1,4 +1,5 @@
 use clap::{Parser, Subcommand};
+use clap_complete::Shell;
 use std::path::PathBuf;
 
 #[derive(Parser)]
@@ -195,6 +196,15 @@ pub enum Command {
         /// Only check for updates, don't install
         #[arg(long)]
         check: bool,
+    },
+
+    /// Generate shell tab-completion script
+    ///
+    /// Prints the completion script for the given shell to stdout. See
+    /// `tdg completions --help` for install instructions per shell.
+    Completions {
+        /// Target shell: bash, zsh, fish, powershell, or elvish
+        shell: Shell,
     },
 
     /// Convert a tar/tar.gz/tar.zst archive to .tg format
