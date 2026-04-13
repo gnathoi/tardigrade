@@ -103,6 +103,60 @@ cargo install tardigrade
 
 Or grab a binary from [Releases](https://github.com/gnathoi/tardigrade/releases).
 
+## Shell completions
+
+`tdg completions <shell>` prints a completion script to stdout. Supported shells: `bash`, `zsh`, `fish`, `powershell`, `elvish`.
+
+**Bash**
+```bash
+# One-shot (reload after editing)
+echo 'source <(tdg completions bash)' >> ~/.bashrc
+
+# Or install system-wide
+tdg completions bash | sudo tee /etc/bash_completion.d/tdg >/dev/null
+```
+
+**Zsh**
+```bash
+# Put completions where zsh looks for them
+mkdir -p ~/.zfunc
+tdg completions zsh > ~/.zfunc/_tdg
+
+# Make sure your ~/.zshrc has:
+#   fpath=(~/.zfunc $fpath)
+#   autoload -Uz compinit && compinit
+```
+
+**Fish**
+```bash
+tdg completions fish > ~/.config/fish/completions/tdg.fish
+```
+
+**PowerShell**
+```powershell
+# Add to your $PROFILE
+tdg completions powershell | Out-String | Invoke-Expression
+```
+
+**Elvish**
+```bash
+tdg completions elvish > ~/.config/elvish/lib/tdg-completion.elv
+# Then in rc.elv:  use tdg-completion
+```
+
+After installing, start a new shell and tab-complete subcommands, flags, and file paths:
+
+```
+$ tdg <TAB>
+cat      completions  convert  create   diff     extract  info     join     list     log
+merge    repair       split    update   verify
+
+$ tdg create --<TAB>
+--append              --encrypt-allow-dedup  --incremental        --no-ignore
+--compress            --ecc                  --level              --quiet
+--encrypt             --help                 --threads            --verbose
+```
+
 ## Usage
 
 ```bash
@@ -181,6 +235,388 @@ tdg create --ecc none archive.tg ./data        # disable ECC for smallest size
 tdg update                                    # update to latest release
 tdg update --check                            # check without installing
 ```
+
+## Command reference
+
+Everything `tdg` can do, with every flag documented. Run `tdg <command> --help` for the same information from the CLI.
+
+### Global flags
+
+Available on every subcommand:
+
+| Flag | Short | Description |
+|------|-------|-------------|
+| `--threads <N>` | `-j` | Number of worker threads. Defaults to all logical cores. Affects compression, decompression, ECC encoding, and parallel file walk. |
+| `--quiet` | `-q` | Suppress all output including progress bars and summaries. Errors still go to stderr. Exit code conveys success/failure. |
+| `--verbose` | `-v` | Verbose output (reserved for future use; currently no-op for most commands). |
+| `--help` | `-h` | Print help for a command. |
+| `--version` | `-V` | Print the `tdg` version. |
+
+---
+
+### `tdg create` — create an archive
+
+Alias: `tdg c`
+
+```
+tdg create [OPTIONS] <ARCHIVE> <PATHS>...
+```
+
+**Arguments**
+- `<ARCHIVE>` — path to the `.tg` file to write
+- `<PATHS>...` — one or more files or directories to archive
+
+**Flags**
+
+| Flag | Default | Description |
+|------|---------|-------------|
+| `--compress <ALGO>` | `zstd` | Compression codec: `zstd`, `lz4`, `none`. |
+| `--level <N>` / `-l <N>` | `9` | zstd level 1–19. Higher = smaller + slower. `--compress lz4` ignores this. |
+| `--no-ignore` |  | Ignore `.gitignore`/`.ignore` files and archive everything (default: respect them — skips `target/`, `node_modules/`, `.git/`, etc.). |
+| `--encrypt` / `-e` |  | Prompts for a passphrase (no echo) and encrypts every block with ChaCha20-Poly1305. Dedup is disabled unless `--encrypt-allow-dedup`. |
+| `--encrypt-allow-dedup` |  | Re-enable dedup under encryption. This leaks content equality (an attacker can tell whether two blocks held the same plaintext) — explicitly off by default. |
+| `--append` |  | Append a new generation to an existing archive (temporal mode). Shared blocks across generations are stored once. |
+| `--incremental <BASE>` |  | Store only blocks not present in `<BASE>`. Extracting the result requires the base archive. |
+| `--ecc <LEVEL>` | `low` | Reed-Solomon erasure coding: `none`, `low` (RS 10,2 ≈ 20% overhead), `medium` (RS 10,4 ≈ 40%), `high` (RS 10,6 ≈ 60%). Self-healing vs. size tradeoff. |
+
+**Examples**
+```bash
+tdg create backup.tg ./project                    # defaults: zstd -9, low ECC, respect .gitignore
+tdg create --compress lz4 fast.tg ./data          # prioritize speed
+tdg create --level 19 tiny.tg ./data              # maximum compression
+tdg create --encrypt secret.tg ./private          # prompts for passphrase
+tdg create --ecc high --level 19 archive.tg ./data
+tdg create --append snapshots.tg ./project        # new generation in existing archive
+tdg create --incremental base.tg diff.tg ./project
+```
+
+**Notes**
+- Combining `--encrypt` with `--incremental` or `--append` is not supported.
+- `--no-ignore` applies to both `.gitignore` and `.ignore` files; hidden files are always included.
+- Symlinks and hardlinks are preserved as-is; their targets are not followed.
+
+---
+
+### `tdg extract` — extract an archive
+
+Alias: `tdg x`
+
+```
+tdg extract [OPTIONS] <ARCHIVE>
+```
+
+**Arguments**
+- `<ARCHIVE>` — the archive to extract. Can be a `.tg` file or a legacy `tar` / `tar.gz` / `tar.zst` (auto-detected by magic bytes).
+
+**Flags**
+
+| Flag | Default | Description |
+|------|---------|-------------|
+| `--output <DIR>` / `-o <DIR>` | current dir | Destination directory. Created if missing. |
+| `--decrypt` / `-d` |  | Decrypt the archive (prompts for passphrase). Alias: `--encrypt`. |
+| `--base <BASE>` |  | Base archive for incremental extraction. Required for archives built with `--incremental`. |
+| `--generation <N>` |  | Extract a specific generation from a temporal archive (0-indexed; see `tdg log`). |
+
+**Examples**
+```bash
+tdg extract backup.tg -o ./restored
+tdg extract --decrypt secret.tg -o ./out
+tdg extract --base base.tg diff.tg -o ./restored    # incremental
+tdg extract --generation 2 snapshots.tg -o ./v2     # temporal
+tdg extract legacy.tar.gz -o ./from-tar             # auto-detect, streams decompression
+```
+
+**Progress output**
+Extract shows a live progress bar, spinner, elapsed time, and ETA in the same style as `create`. Suppressed with `--quiet`. For streaming tar formats, progress is measured against the on-disk file size; for `.tg` archives, it's measured against total uncompressed bytes from the index.
+
+**Security**
+- Refuses to extract entries with `..` components that would escape the output directory.
+- Refuses symlinks whose resolved target escapes the output directory.
+
+---
+
+### `tdg list` — list archive contents
+
+Alias: `tdg ls`
+
+```
+tdg list [OPTIONS] <ARCHIVE>
+```
+
+**Arguments**
+- `<ARCHIVE>` — archive to inspect.
+
+**Flags**
+
+| Flag | Short | Description |
+|------|-------|-------------|
+| `--long` | `-l` | Detailed output: permissions, owner, size, mtime, path. Similar to `ls -l`. |
+
+**Examples**
+```bash
+tdg list backup.tg
+tdg list -l backup.tg
+tdg ls backup.tg | grep '\.rs$'
+```
+
+---
+
+### `tdg info` — archive statistics
+
+```
+tdg info <ARCHIVE>
+```
+
+Prints format version, flags (encrypted, erasure-coded, incremental), file/dir counts, block counts (total vs unique), dedup savings, ECC configuration, and total compressed size.
+
+```bash
+tdg info backup.tg
+```
+
+---
+
+### `tdg cat` — print one file to stdout
+
+```
+tdg cat [OPTIONS] <ARCHIVE> <PATH>
+```
+
+**Arguments**
+- `<ARCHIVE>` — archive to read from.
+- `<PATH>` — path of the file inside the archive (forward or back slashes accepted; leading `/` ignored).
+
+**Flags**
+
+| Flag | Short | Description |
+|------|-------|-------------|
+| `--decrypt` | `-d` | Prompts for a passphrase. Alias: `--encrypt`. |
+
+**Examples**
+```bash
+tdg cat backup.tg src/main.rs
+tdg cat backup.tg config.yaml | head -20
+tdg cat --decrypt secret.tg notes.md
+```
+
+Reads only the blocks needed for the requested file — no full archive decompression.
+
+---
+
+### `tdg verify` — integrity check
+
+```
+tdg verify <ARCHIVE>
+```
+
+Walks every block, verifies BLAKE3 hashes and CRC32 block checksums, checks both the primary and redundant index, and reports corruption with ECC recovery status.
+
+```bash
+tdg verify backup.tg
+# header ok  footer ok  index ok
+# blocks 4/4 ok, 0 corrupted
+```
+
+Exit code: `0` if clean, `1` if any block is corrupted beyond ECC recovery.
+
+---
+
+### `tdg repair` — reconstruct corrupted blocks
+
+```
+tdg repair <ARCHIVE>
+```
+
+Finds corrupted blocks (failed hash/CRC check), reconstructs them using Reed-Solomon parity, and writes them back into the archive in place. Requires the archive to have been created with `--ecc` (low/medium/high).
+
+```bash
+tdg repair photos.tg
+# repaired 1 block (Reed-Solomon recovery)
+```
+
+Fails with a clear error if ECC is absent or damage exceeds the parity budget.
+
+---
+
+### `tdg log` — list temporal generations
+
+```
+tdg log <ARCHIVE>
+```
+
+For archives built with `tdg create --append`, prints every generation's index: generation number, creation time, file count, total size, and dedup savings vs. prior generations.
+
+```bash
+tdg log snapshots.tg
+# @0  2026-04-01  243 files   12.3 MB
+# @1  2026-04-08  245 files   +81 KB (delta)
+# @2  2026-04-13  251 files   +156 KB (delta)
+```
+
+Feeds directly into `tdg extract --generation N` and `tdg diff --from A --to B`.
+
+---
+
+### `tdg diff` — diff two generations
+
+```
+tdg diff --from <N> --to <M> <ARCHIVE>
+```
+
+**Flags**
+
+| Flag | Description |
+|------|-------------|
+| `--from <N>` | Generation number to diff from. |
+| `--to <M>` | Generation number to diff to. |
+
+Prints added, removed, and modified paths between two generations of a temporal archive.
+
+```bash
+tdg diff --from 0 --to 2 snapshots.tg
+```
+
+---
+
+### `tdg merge` — merge two archives
+
+```
+tdg merge [OPTIONS] <A> <B>
+```
+
+**Arguments**
+- `<A>` — first archive.
+- `<B>` — second archive.
+
+**Flags**
+
+| Flag | Short | Description |
+|------|-------|-------------|
+| `--output <ARCHIVE>` | `-o` | Output archive path. Required. |
+
+Combines two archives into one with cross-archive dedup — identical blocks from either side are stored once.
+
+```bash
+tdg merge a.tg b.tg -o merged.tg
+```
+
+If both archives contain the same path, the entry from `<B>` wins.
+
+---
+
+### `tdg split` — split into volumes
+
+```
+tdg split --size <SIZE> <ARCHIVE>
+```
+
+**Arguments**
+- `<ARCHIVE>` — archive to split.
+
+**Flags**
+
+| Flag | Description |
+|------|-------------|
+| `--size <SIZE>` | Max volume size. Accepts `K`, `M`, `G` suffixes (e.g. `500M`, `4G`). Required. |
+
+Writes sibling files `<ARCHIVE>.001`, `<ARCHIVE>.002`, ... each at most `<SIZE>` bytes.
+
+```bash
+tdg split backup.tg --size 4G
+# wrote backup.tg.001 (4.0 GB), backup.tg.002 (4.0 GB), backup.tg.003 (1.2 GB)
+```
+
+Useful for FAT32 limits, chunked uploads, or multi-disc transport.
+
+---
+
+### `tdg join` — reassemble split volumes
+
+```
+tdg join [OPTIONS] <VOLUMES>...
+```
+
+**Arguments**
+- `<VOLUMES>...` — volume files in order (e.g. `backup.tg.001 backup.tg.002 ...`).
+
+**Flags**
+
+| Flag | Short | Description |
+|------|-------|-------------|
+| `--output <ARCHIVE>` | `-o` | Output archive path. Required. |
+
+```bash
+tdg join backup.tg.001 backup.tg.002 backup.tg.003 -o backup.tg
+```
+
+Validates that volumes concatenate into a coherent archive (header, footer, index all check out).
+
+---
+
+### `tdg convert` — migrate tar to .tg
+
+```
+tdg convert [OPTIONS] <INPUT> <OUTPUT>
+```
+
+**Arguments**
+- `<INPUT>` — source `tar`, `tar.gz`, or `tar.zst`.
+- `<OUTPUT>` — destination `.tg` file.
+
+**Flags**
+
+| Flag | Short | Default | Description |
+|------|-------|---------|-------------|
+| `--compress <ALGO>` |  | `zstd` | Codec for the new archive. |
+| `--level <N>` | `-l` | `9` | zstd level 1–19. |
+
+Extracts the tar to a temp directory then re-archives as `.tg` with dedup + ECC applied. Slower than `tdg create` on the original source, but it's the supported migration path when you only have the tar.
+
+```bash
+tdg convert legacy.tar.zst output.tg
+tdg convert --level 19 legacy.tar.gz tight.tg
+```
+
+To simply *read* a tar archive without converting, use `tdg extract` — it auto-detects the format.
+
+---
+
+### `tdg update` — self-update
+
+```
+tdg update [OPTIONS]
+```
+
+**Flags**
+
+| Flag | Description |
+|------|-------------|
+| `--check` | Only check for updates; don't install. Exit code `0` if up to date, non-zero if a newer release exists. |
+
+Downloads the latest release binary from GitHub, verifies the SHA256 checksum, and atomically replaces the current `tdg` executable.
+
+```bash
+tdg update
+tdg update --check
+```
+
+---
+
+### `tdg completions` — generate shell completion script
+
+```
+tdg completions <SHELL>
+```
+
+**Arguments**
+- `<SHELL>` — one of: `bash`, `zsh`, `fish`, `powershell`, `elvish`.
+
+Prints the completion script to stdout. See [Shell completions](#shell-completions) above for per-shell install instructions.
+
+```bash
+tdg completions zsh > ~/.zfunc/_tdg
+```
+
+---
 
 ## Example Output
 
