@@ -15,6 +15,7 @@ use crate::hash::merkle_root;
 use crate::index::serialize_index;
 use crate::metadata::capture_metadata;
 use crate::progress::CreateProgress;
+use crate::threads::BatchController;
 
 /// BufWriter buffer size (256 KB for better sequential write performance)
 const WRITE_BUFFER_SIZE: usize = 256 * 1024;
@@ -28,6 +29,8 @@ pub struct CreateOptions {
     pub passphrase: Option<Vec<u8>>,
     pub ecc_level: Option<EccLevel>,
     pub allow_dedup_with_encryption: bool,
+    /// Print per-batch thread/memory adjustments to stderr.
+    pub verbose: bool,
 }
 
 impl Default for CreateOptions {
@@ -40,6 +43,7 @@ impl Default for CreateOptions {
             passphrase: None,
             ecc_level: None,
             allow_dedup_with_encryption: false,
+            verbose: false,
         }
     }
 }
@@ -192,7 +196,13 @@ pub fn create_archive(
     // Phase 2+3: Process files in parallel batches, write in walk order.
     // Each batch is compressed in parallel via rayon, then written sequentially
     // before the next batch starts. Memory is bounded to O(batch_size × file_size).
-    let batch_size = rayon::current_num_threads().max(4) * 4;
+    //
+    // The initial batch size is cores*4 (classic default). A BatchController
+    // then tunes it at runtime:
+    //   - shrink when process RSS exceeds the memory budget threshold
+    //   - freeze growth when adding work per batch stops improving throughput
+    let initial_batch = rayon::current_num_threads().max(4) * 4;
+    let mut batch_controller = BatchController::new(initial_batch);
 
     let progress_ref = &progress;
     let process_one =
@@ -269,7 +279,16 @@ pub fn create_archive(
     // ECC group buffer
     let mut ecc_group = opts.ecc_level.as_ref().map(|_| EccGroup::new());
 
-    for batch in walk_entries.chunks(batch_size) {
+    let mut cursor = 0;
+    while cursor < walk_entries.len() {
+        let bs = batch_controller.batch_size();
+        let end = (cursor + bs).min(walk_entries.len());
+        let batch = &walk_entries[cursor..end];
+        cursor = end;
+
+        let bytes_in_batch: u64 = batch.iter().map(|(_, _, sz)| *sz).sum();
+        batch_controller.start_batch();
+
         // Process batch in parallel, preserving walk order
         let processed: Vec<Result<ProcessedFile>> = batch.par_iter().map(process_one).collect();
 
@@ -371,7 +390,15 @@ pub fn create_archive(
 
             entries.push(pf.entry);
         }
+
+        batch_controller.end_batch(bytes_in_batch);
     } // end batch loop
+
+    if opts.verbose {
+        for line in batch_controller.diagnostics() {
+            eprintln!("  · {line}");
+        }
+    }
 
     // Flush any remaining partial ECC group
     if let (Some(group), Some(level)) = (&mut ecc_group, &opts.ecc_level)

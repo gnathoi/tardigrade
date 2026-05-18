@@ -20,6 +20,7 @@ mod progress;
 mod repair;
 mod split;
 mod temporal;
+mod threads;
 mod update;
 mod verify;
 
@@ -36,11 +37,19 @@ use cli::{Cli, Command};
 fn main() {
     let cli = Cli::parse();
 
-    if let Some(threads) = cli.threads {
-        rayon::ThreadPoolBuilder::new()
-            .num_threads(threads)
-            .build_global()
-            .ok();
+    let thread_config = threads::ThreadConfig::configure(cli.threads);
+    rayon::ThreadPoolBuilder::new()
+        .num_threads(thread_config.threads)
+        .build_global()
+        .ok();
+    if cli.verbose && !cli.quiet {
+        eprintln!("  {} {}", style("·").dim(), thread_config.diagnostic());
+    } else if thread_config.clamped_by_memory() && !cli.quiet {
+        eprintln!(
+            "  {} {}",
+            style("note:").yellow(),
+            thread_config.diagnostic()
+        );
     }
 
     let result = match cli.command {
@@ -93,6 +102,7 @@ fn main() {
                     encrypt_allow_dedup,
                     ecc,
                     cli.quiet,
+                    cli.verbose,
                 )
             }
         }
@@ -153,6 +163,7 @@ fn cmd_create(
     encrypt_allow_dedup: bool,
     ecc: Option<String>,
     quiet: bool,
+    verbose: bool,
 ) -> error::Result<()> {
     let codec = compress::codec_from_str(codec_name)?;
 
@@ -202,6 +213,7 @@ fn cmd_create(
         passphrase,
         ecc_level,
         allow_dedup_with_encryption: encrypt_allow_dedup,
+        verbose,
     };
 
     let source_refs: Vec<&std::path::Path> = paths.iter().map(|p| p.as_path()).collect();
@@ -338,6 +350,7 @@ fn cmd_append(
         passphrase: None,
         ecc_level,
         allow_dedup_with_encryption: false,
+        verbose: false,
     };
 
     let source_refs: Vec<&std::path::Path> = paths.iter().map(|p| p.as_path()).collect();
@@ -409,6 +422,7 @@ fn cmd_create_incremental(
         passphrase: None,
         ecc_level,
         allow_dedup_with_encryption: false,
+        verbose: false,
     };
 
     let source_refs: Vec<&std::path::Path> = paths.iter().map(|p| p.as_path()).collect();

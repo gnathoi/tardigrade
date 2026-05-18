@@ -247,6 +247,7 @@ pub fn convert_to_tg(
         passphrase: None,
         ecc_level: None,
         allow_dedup_with_encryption: false,
+        verbose: false,
     };
 
     crate::archive::create_archive(tg_path, &[tmp.path()], &opts)
